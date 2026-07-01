@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -100,15 +101,60 @@ func saveVPNState(st VPNState) {
 }
 
 func isOpenConnectRunning() bool {
+	if pid := readTrackedOpenConnectPID(); pid > 0 && processRunning(pid) {
+		return true
+	}
+	return findOpenConnectPID() > 0
+}
+
+func readTrackedOpenConnectPID() int {
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		return 0
+	}
+	return pid
+}
+
+func processRunning(pid int) bool {
+	if isProcessZombie(pid) {
 		return false
 	}
-	pid := strings.TrimSpace(string(data))
-	if pid == "" {
+	return exec.Command("kill", "-0", strconv.Itoa(pid)).Run() == nil
+}
+
+func isProcessZombie(pid int) bool {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return true
+	}
+	closeIdx := strings.LastIndex(string(data), ")")
+	if closeIdx < 0 || closeIdx+2 >= len(data) {
 		return false
 	}
-	return exec.Command("kill", "-0", pid).Run() == nil
+	return data[closeIdx+2] == 'Z'
+}
+
+func findOpenConnectPID() int {
+	out, err := exec.Command("pgrep", "-n", "-x", "openconnect").Output()
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || pid <= 0 || isProcessZombie(pid) {
+		return 0
+	}
+	return pid
+}
+
+func writeOpenConnectPID(pid int) {
+	if pid <= 0 {
+		return
+	}
+	_ = os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", pid)), 0644)
 }
 
 func detectTunInterface() string {
@@ -176,7 +222,7 @@ func StartConnect(profileID, password string) error {
 		return fmt.Errorf("failed to start openconnect: %w", err)
 	}
 
-	_ = os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", cmd.Process.Pid)), 0644)
+	writeOpenConnectPID(cmd.Process.Pid)
 
 	sess := &vpnConn{
 		cmd:     cmd,
@@ -193,6 +239,8 @@ func StartConnect(profileID, password string) error {
 		ServerURL:   profile.ServerURL,
 		InputKind:   "token",
 	})
+
+	go watchOpenConnectProcess(sess)
 
 	go func() {
 		if _, err := fmt.Fprintf(stdinWriter, "%s\n", pass); err != nil {
@@ -232,7 +280,10 @@ func monitorVPNSession(sess *vpnConn) {
 				return
 			}
 
-			if sess.cmd.ProcessState != nil || !processAlive(sess.cmd) {
+			if !processAlive(sess.cmd) {
+				if findOpenConnectPID() > 0 {
+					continue
+				}
 				failSession(sess, "openconnect exited before tunnel was established")
 				return
 			}
@@ -271,6 +322,7 @@ func finishConnected(sess *vpnConn, tun string) {
 		return
 	}
 
+	ignoreTunInNetworkManager(tun)
 	_ = ApplyVPNNAT(tun)
 	st := VPNState{
 		Connected:   true,
@@ -286,6 +338,99 @@ func finishConnected(sess *vpnConn, tun string) {
 	cfg := GetRouterConfig()
 	cfg.LastProfileID = sess.profile.ID
 	_ = SaveRouterConfig(cfg)
+
+	if pid := findOpenConnectPID(); pid > 0 {
+		writeOpenConnectPID(pid)
+	}
+}
+
+func ignoreTunInNetworkManager(iface string) {
+	if !usesNetworkManager() || iface == "" {
+		return
+	}
+	_ = exec.Command("nmcli", "device", "set", iface, "managed", "no").Run()
+}
+
+func watchOpenConnectProcess(sess *vpnConn) {
+	var waitErr error
+	if sess != nil && sess.cmd != nil {
+		waitErr = sess.cmd.Wait()
+	}
+
+	vpnMu.Lock()
+	defer vpnMu.Unlock()
+
+	if activeVPNSession != sess {
+		return
+	}
+
+	tun := detectTunInterface()
+	if tun != "" && interfaceHasIPv4(tun) {
+		if pid := findOpenConnectPID(); pid > 0 {
+			writeOpenConnectPID(pid)
+			log.Printf("openconnect parent exited (%v); tracking pid %d", waitErr, pid)
+			go watchOpenConnectPID(sess, pid)
+			return
+		}
+	}
+
+	handleOpenConnectStopped(sess, waitErr)
+}
+
+func watchOpenConnectPID(sess *vpnConn, pid int) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		vpnMu.Lock()
+		active := activeVPNSession == sess
+		vpnMu.Unlock()
+		if !active {
+			return
+		}
+		if processRunning(pid) {
+			continue
+		}
+		break
+	}
+
+	vpnMu.Lock()
+	defer vpnMu.Unlock()
+	if activeVPNSession != sess {
+		return
+	}
+	handleOpenConnectStopped(sess, fmt.Errorf("openconnect pid %d exited", pid))
+}
+
+func handleOpenConnectStopped(sess *vpnConn, reason error) {
+	if activeVPNSession != sess {
+		return
+	}
+	log.Printf("openconnect stopped: %v", reason)
+	activeVPNSession = nil
+	_ = os.Remove(pidFile)
+
+	st := GetVPNState()
+	switch st.Phase {
+	case VPNPhaseConnected:
+		saveVPNState(VPNState{
+			Phase:     VPNPhaseDisconnected,
+			LastError: "VPN disconnected",
+		})
+	case VPNPhaseConnecting, VPNPhaseNeedInput:
+		msg := "openconnect exited before tunnel was established"
+		if reason != nil {
+			msg = reason.Error()
+		}
+		saveVPNState(VPNState{
+			Phase:     VPNPhaseError,
+			ProfileID: sess.profile.ID,
+			LastError: msg,
+		})
+	default:
+		saveVPNState(VPNState{Phase: VPNPhaseDisconnected})
+	}
+	_ = ApplyDirectNAT()
 }
 
 func failSession(sess *vpnConn, msg string) {
@@ -295,13 +440,13 @@ func failSession(sess *vpnConn, msg string) {
 		return
 	}
 	log.Printf("VPN session failed: %s", msg)
+	activeVPNSession = nil
 	_ = killSessionProcess(sess)
 	saveVPNState(VPNState{
 		Phase:     VPNPhaseError,
 		ProfileID: sess.profile.ID,
 		LastError: msg,
 	})
-	activeVPNSession = nil
 	_ = ApplyDirectNAT()
 }
 
@@ -368,21 +513,22 @@ func DisconnectVPN() error {
 
 func disconnectLocked() error {
 	if activeVPNSession != nil {
-		close(activeVPNSession.stopCh)
-		_ = killSessionProcess(activeVPNSession)
-		if activeVPNSession.stdin != nil {
-			_ = activeVPNSession.stdin.Close()
-		}
+		sess := activeVPNSession
 		activeVPNSession = nil
+		close(sess.stopCh)
+		_ = killSessionProcess(sess)
+		if sess.stdin != nil {
+			_ = sess.stdin.Close()
+		}
 	}
 
-	if data, err := os.ReadFile(pidFile); err == nil {
-		pid := strings.TrimSpace(string(data))
-		if pid != "" {
-			_ = exec.Command("kill", pid).Run()
-			time.Sleep(500 * time.Millisecond)
-			_ = exec.Command("kill", "-9", pid).Run()
-		}
+	if pid := readTrackedOpenConnectPID(); pid > 0 && processRunning(pid) {
+		_ = exec.Command("kill", strconv.Itoa(pid)).Run()
+		time.Sleep(500 * time.Millisecond)
+		_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
+	}
+	if pid := findOpenConnectPID(); pid > 0 {
+		_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
 	}
 	_ = os.Remove(pidFile)
 	_ = ApplyDirectNAT()
@@ -398,14 +544,14 @@ func killSessionProcess(sess *vpnConn) error {
 	_ = syscall.Kill(-pgid, syscall.SIGTERM)
 	time.Sleep(500 * time.Millisecond)
 	_ = syscall.Kill(-pgid, syscall.SIGKILL)
-	return sess.cmd.Wait()
+	return nil
 }
 
 func processAlive(cmd *exec.Cmd) bool {
 	if cmd == nil || cmd.Process == nil {
 		return false
 	}
-	return exec.Command("kill", "-0", fmt.Sprintf("%d", cmd.Process.Pid)).Run() == nil
+	return processRunning(cmd.Process.Pid)
 }
 
 func interfaceHasIPv4(iface string) bool {

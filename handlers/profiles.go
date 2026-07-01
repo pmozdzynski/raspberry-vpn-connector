@@ -4,14 +4,16 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
 
 const profilesFile = configDir + "/profiles.json"
 
-// VPNProfile is a saved Fortinet/OpenConnect endpoint.
+// VPNProfile is a saved OpenConnect endpoint.
 type VPNProfile struct {
 	ID            string    `json:"id"`
 	Name          string    `json:"name"`
@@ -30,6 +32,35 @@ type profilesStore struct {
 }
 
 var profilesMu sync.RWMutex
+
+var supportedVPNProtocols = []string{
+	"anyconnect",
+	"nc",
+	"gp",
+	"pulse",
+	"f5",
+	"fortinet",
+	"array",
+}
+
+func SupportedVPNProtocols() []string {
+	out := make([]string, len(supportedVPNProtocols))
+	copy(out, supportedVPNProtocols)
+	return out
+}
+
+func NormalizeVPNProtocol(protocol string) string {
+	p := strings.ToLower(strings.TrimSpace(protocol))
+	if p == "" {
+		return "fortinet"
+	}
+	for _, allowed := range supportedVPNProtocols {
+		if p == allowed {
+			return p
+		}
+	}
+	return ""
+}
 
 func newProfileID() string {
 	b := make([]byte, 8)
@@ -83,8 +114,9 @@ func UpsertProfile(p VPNProfile) (VPNProfile, error) {
 		p.CreatedAt = now
 	}
 	p.UpdatedAt = now
+	p.Protocol = NormalizeVPNProtocol(p.Protocol)
 	if p.Protocol == "" {
-		p.Protocol = "fortinet"
+		return VPNProfile{}, fmt.Errorf("unsupported protocol (use anyconnect, nc, gp, pulse, f5, fortinet, or array)")
 	}
 
 	found := false

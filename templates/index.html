@@ -21,7 +21,7 @@
             <p id="vpnDetails" class="muted"></p>
             <div id="tokenPanel" class="token-panel hidden">
                 <p id="tokenPrompt" class="muted"></p>
-                <label>FortiToken / OTP
+                <label>Token / OTP
                     <input type="text" id="vpnToken" inputmode="numeric" autocomplete="one-time-code" placeholder="123456">
                 </label>
                 <button id="submitTokenBtn" class="primary">Submit token</button>
@@ -39,7 +39,7 @@
                 <label>Password
                     <input type="password" id="connectPassword" autocomplete="current-password">
                 </label>
-                <p class="muted small">FortiToken may be requested after the password.</p>
+                <p class="muted small">A one-time code may be requested after the password (FortiToken, OTP, etc.).</p>
                 <div class="button-row">
                     <button id="connectConfirmBtn" class="primary">Connect</button>
                     <button id="connectCancelBtn" class="secondary">Cancel</button>
@@ -56,6 +56,17 @@
             <h3 id="formTitle">Add Profile</h3>
             <form id="profileForm" class="profile-form">
                 <input type="hidden" id="profileId">
+                <label>Protocol
+                    <select id="profileProtocol" required>
+                        <option value="fortinet">Fortinet FortiGate (fortinet)</option>
+                        <option value="anyconnect">Cisco AnyConnect / ocserv (anyconnect)</option>
+                        <option value="gp">Palo Alto GlobalProtect (gp)</option>
+                        <option value="pulse">Pulse Connect Secure (pulse)</option>
+                        <option value="f5">F5 BIG-IP (f5)</option>
+                        <option value="nc">Juniper Network Connect (nc)</option>
+                        <option value="array">Array Networks (array)</option>
+                    </select>
+                </label>
                 <label>Name <input type="text" id="profileName" required placeholder="Office VPN"></label>
                 <label>Username <input type="text" id="profileUser" required placeholder="my.username"></label>
                 <label>Server URL <input type="url" id="profileURL" required placeholder="https://secure.foo.bar:20443"></label>

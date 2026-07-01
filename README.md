@@ -91,6 +91,8 @@ sudo ./scripts/install.sh
 
 ## VPN profile example
 
+Each profile stores an OpenConnect `--protocol` value (`anyconnect`, `nc`, `gp`, `pulse`, `f5`, `fortinet`, `array`). Fortinet example:
+
 ```bash
 openconnect --protocol=fortinet \
   -u my.username \

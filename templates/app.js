@@ -45,8 +45,8 @@ function renderVPN(vpn) {
         disconnectBtn.disabled = false;
         tokenPanel.classList.add("hidden");
     } else if (vpn.phase === "need_input") {
-        details.textContent = "Enter your FortiToken or OTP code.";
-        tokenPrompt.textContent = vpn.input_prompt || "Fortinet is waiting for a one-time token.";
+        details.textContent = "Enter your one-time token or OTP code.";
+        tokenPrompt.textContent = vpn.input_prompt || "VPN server is waiting for a one-time token.";
         tokenPanel.classList.remove("hidden");
         disconnectBtn.disabled = false;
         document.getElementById("vpnToken").focus();
@@ -78,7 +78,7 @@ function renderProfiles(profiles, vpn) {
             <div class="profile-card ${active ? "active" : ""}">
                 <div>
                     <strong>${escapeHtml(p.name)}</strong>
-                    <div class="muted small">${escapeHtml(p.username)} @ ${escapeHtml(p.server_url)}</div>
+                    <div class="muted small">${escapeHtml(p.protocol || "fortinet")} · ${escapeHtml(p.username)} @ ${escapeHtml(p.server_url)}</div>
                 </div>
                 <div class="button-row compact">
                     <button class="primary connect-btn" data-id="${p.id}" data-name="${escapeHtml(p.name)}" ${busy ? "disabled" : ""}>Connect</button>
@@ -147,7 +147,7 @@ async function startConnect(profileId, password) {
         return;
     }
     closeConnectModal();
-    showInfo("Connecting... enter FortiToken if prompted", "info");
+    showInfo("Connecting... enter token/OTP if prompted", "info");
     refresh();
 }
 
@@ -188,6 +188,7 @@ function editProfile(id) {
         editingProfile = p;
         document.getElementById("formTitle").textContent = "Edit Profile";
         document.getElementById("profileId").value = p.id;
+        document.getElementById("profileProtocol").value = p.protocol || "fortinet";
         document.getElementById("profileName").value = p.name;
         document.getElementById("profileUser").value = p.username;
         document.getElementById("profileURL").value = p.server_url;
@@ -209,7 +210,7 @@ document.getElementById("profileForm").addEventListener("submit", async (e) => {
     const body = {
         id: document.getElementById("profileId").value,
         name: document.getElementById("profileName").value,
-        protocol: "fortinet",
+        protocol: document.getElementById("profileProtocol").value,
         username: document.getElementById("profileUser").value,
         server_url: document.getElementById("profileURL").value,
         servercert_pin: document.getElementById("profilePin").value,

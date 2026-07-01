@@ -44,6 +44,11 @@ func ProfilesHandler(w http.ResponseWriter, r *http.Request) {
 		p.Username = strings.TrimSpace(p.Username)
 		p.ServerURL = strings.TrimSpace(p.ServerURL)
 		p.ServerCertPin = strings.TrimSpace(p.ServerCertPin)
+		p.Protocol = NormalizeVPNProtocol(p.Protocol)
+		if p.Protocol == "" {
+			http.Error(w, "unsupported protocol (use anyconnect, nc, gp, pulse, f5, fortinet, or array)", http.StatusBadRequest)
+			return
+		}
 		if p.Name == "" || p.Username == "" || p.ServerURL == "" || p.ServerCertPin == "" {
 			http.Error(w, "name, username, server_url, and servercert_pin are required", http.StatusBadRequest)
 			return
