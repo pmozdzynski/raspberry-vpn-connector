@@ -20,15 +20,74 @@ The setup wizard lists all detected Ethernet and WiFi interfaces. Pick **two** f
 
 ## Quick start
 
-1. Ensure WAN has internet (WiFi associated or cable plugged in).
-2. Copy this repo to the device and run:
+### Bare device: one command (recommended)
+
+On a **fresh** Raspberry Pi / Debian system with network and `curl` or `wget`, run as root:
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/main/scripts/bootstrap-device.sh | sh
+```
+
+Or with `wget`:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/main/scripts/bootstrap-device.sh | sh
+```
+
+This script (`scripts/bootstrap-device.sh`) will:
+
+1. Install **git**, **curl**, **ca-certificates**, **Go**, **openconnect**, **dnsmasq**, **iptables**, **iproute2**, and **hostapd** via `apt`
+2. **Clone** this repository to `/opt/vpn-connector-src`
+3. **Compile** the binary (auto-detects Pi 1 `GOARM=6`, Pi 2/3 `GOARM=7`, etc.)
+4. Run **`install.sh`**: installs the app and starts the systemd service
+
+At the end it prints URLs like:
+
+```
+http://192.168.x.x:5000/setup
+```
+
+Open that in a browser to finish configuration (WAN/LAN, DHCP, admin password).
+
+> **Note:** The device IP comes from your home router/ISP DHCP and may be unknown beforehand. The script lists every IPv4 address it finds. If none appear yet, connect Ethernet, wait a moment, then run `ip -4 addr show`.
+
+Optional environment variables:
+
+```bash
+REPO_URL=https://github.com/you/fork.git \
+REPO_DIR=/opt/vpn-connector-src \
+BRANCH=main \
+  sh bootstrap-device.sh
+```
+
+On very low-memory Pis (Pi 1), enable swap before building if compilation fails:
+
+```bash
+sudo dphys-swapfile swapoff
+sudo sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=512/' /etc/dphys-swapfile
+sudo dphys-swapfile setup && sudo dphys-swapfile swapon
+```
+
+### Quick install (repo already on device)
+
+If you already cloned the repo (or copied files via `scp`):
+
+```bash
+cd raspberry-vpn-connector
+
+# Option A: build on another machine, copy binary here (Pi 3 example):
+# GOOS=linux GOARCH=arm GOARM=7 go build -o vpn-connector .
+
+# Option B: full bootstrap from repo (installs git/go/packages if missing):
+sudo ./scripts/bootstrap-device.sh
+
+# Option C: binary already built, app install only:
 sudo ./scripts/install.sh
 ```
 
-3. Open `http://<device-ip>:5000/setup` and complete the wizard.
-4. Log in at `/login`, add VPN profiles, connect.
+1. Ensure WAN has internet (WiFi associated or cable plugged in).
+2. Open `http://<device-ip>:5000/setup` and complete the wizard.
+3. Log in at `/login`, add VPN profiles, connect.
 
 ## VPN profile example
 
