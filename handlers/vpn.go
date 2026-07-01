@@ -53,8 +53,10 @@ type vpnConn struct {
 }
 
 var (
-	vpnMu           sync.Mutex
+	vpnMu            sync.Mutex
 	activeVPNSession *vpnConn
+	autoReconnectMu  sync.Mutex
+	autoReconnecting bool
 )
 
 func GetVPNState() VPNState {
@@ -83,7 +85,13 @@ func GetVPNState() VPNState {
 	}
 
 	st.Connected = running
-	if st.Connected {
+	if st.Phase == VPNPhaseConnected && !running {
+		st.Connected = false
+		st.Phase = VPNPhaseDisconnected
+		if st.LastError == "" {
+			st.LastError = "VPN disconnected"
+		}
+	} else if st.Connected {
 		st.Phase = VPNPhaseConnected
 		if st.TunIface == "" {
 			st.TunIface = detectTunInterface()
@@ -196,14 +204,7 @@ func StartConnect(profileID, password string) error {
 	_ = os.WriteFile(logFile, []byte{}, 0644)
 
 	stdinReader, stdinWriter := io.Pipe()
-	args := []string{
-		"--protocol=" + profile.Protocol,
-		"-u", profile.Username,
-		"--servercert", profile.ServerCertPin,
-		"--passwd-on-stdin",
-		"--no-dtls",
-		profile.ServerURL,
-	}
+	args := buildOpenConnectArgs(profile)
 
 	cmd := exec.Command("openconnect", args...)
 	cmd.Stdin = stdinReader
@@ -411,11 +412,15 @@ func handleOpenConnectStopped(sess *vpnConn, reason error) {
 	_ = os.Remove(pidFile)
 
 	st := GetVPNState()
+	wasConnected := st.Phase == VPNPhaseConnected
+	profile := sess.profile
 	switch st.Phase {
 	case VPNPhaseConnected:
 		saveVPNState(VPNState{
 			Phase:     VPNPhaseDisconnected,
-			LastError: "VPN disconnected",
+			ProfileID: profile.ID,
+			ProfileName: profile.Name,
+			LastError: disconnectReasonFromLog(reason),
 		})
 	case VPNPhaseConnecting, VPNPhaseNeedInput:
 		msg := "openconnect exited before tunnel was established"
@@ -431,6 +436,72 @@ func handleOpenConnectStopped(sess *vpnConn, reason error) {
 		saveVPNState(VPNState{Phase: VPNPhaseDisconnected})
 	}
 	_ = ApplyDirectNAT()
+	if wasConnected && profile.SavePassword && profile.Password != "" {
+		scheduleAutoReconnect(profile.ID)
+	}
+}
+
+func buildOpenConnectArgs(profile VPNProfile) []string {
+	args := []string{
+		"--protocol=" + profile.Protocol,
+		"-u", profile.Username,
+		"--servercert", profile.ServerCertPin,
+		"--passwd-on-stdin",
+		"--reconnect-timeout=600",
+		"--force-dpd=30",
+	}
+	if profile.NoDTLS {
+		args = append(args, "--no-dtls")
+	}
+	args = append(args, profile.ServerURL)
+	return args
+}
+
+func disconnectReasonFromLog(reason error) string {
+	tail := strings.ToLower(readLogTail(30))
+	switch {
+	case strings.Contains(tail, "cookie is no longer valid"), strings.Contains(tail, "cookie was rejected"):
+		return "VPN session expired on server; reconnect (token may be required)"
+	case strings.Contains(tail, "detected dead peer"):
+		return "VPN lost contact with server (dead peer); auto-reconnect will retry if password is saved"
+	default:
+		if reason != nil && reason.Error() != "" {
+			return "VPN disconnected: " + reason.Error()
+		}
+		return "VPN disconnected"
+	}
+}
+
+func scheduleAutoReconnect(profileID string) {
+	autoReconnectMu.Lock()
+	if autoReconnecting {
+		autoReconnectMu.Unlock()
+		return
+	}
+	autoReconnecting = true
+	autoReconnectMu.Unlock()
+
+	go func() {
+		defer func() {
+			autoReconnectMu.Lock()
+			autoReconnecting = false
+			autoReconnectMu.Unlock()
+		}()
+
+		time.Sleep(8 * time.Second)
+		profile, ok := GetProfile(profileID)
+		if !ok || profile.Password == "" {
+			return
+		}
+		st := GetVPNState()
+		if st.Phase == VPNPhaseConnected || isOpenConnectRunning() {
+			return
+		}
+		log.Printf("Auto-reconnecting VPN profile %s", profile.Name)
+		if err := StartConnect(profile.ID, profile.Password); err != nil {
+			log.Printf("Auto-reconnect failed: %v", err)
+		}
+	}()
 }
 
 func failSession(sess *vpnConn, msg string) {

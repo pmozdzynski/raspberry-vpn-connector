@@ -22,6 +22,7 @@ type VPNProfile struct {
 	ServerURL     string    `json:"server_url"`
 	ServerCertPin string    `json:"servercert_pin"`
 	SavePassword  bool      `json:"save_password"`
+	NoDTLS        bool      `json:"no_dtls,omitempty"`
 	Password      string    `json:"password,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`

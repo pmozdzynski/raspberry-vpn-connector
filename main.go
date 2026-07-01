@@ -75,6 +75,9 @@ func main() {
 	}
 
 	if handlers.IsConfigured() {
+		if err := handlers.EnsureRouterServices(); err != nil {
+			log.Printf("Warning: router services: %v", err)
+		}
 		go restoreVPNState()
 	}
 

@@ -19,6 +19,7 @@
             <h3>VPN Status</h3>
             <p><strong>State:</strong> <span id="vpnState">Loading...</span></p>
             <p id="vpnDetails" class="muted"></p>
+            <p id="wifiApStatus" class="muted small"></p>
             <div id="tokenPanel" class="token-panel hidden">
                 <p id="tokenPrompt" class="muted"></p>
                 <label>Token / OTP
@@ -73,6 +74,9 @@
                 <label>Server cert pin <input type="text" id="profilePin" required placeholder="pin-sha256:XXXXXXYYYY="></label>
                 <label class="checkbox-label">
                     <input type="checkbox" id="savePassword"> Save password for reconnect
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="noDTLS"> Disable DTLS (SSL-only; try if connection drops)
                 </label>
                 <label id="passwordField">Password <input type="password" id="profilePassword" autocomplete="new-password"></label>
                 <div class="button-row">

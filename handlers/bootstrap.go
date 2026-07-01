@@ -277,6 +277,7 @@ ssid=%s
 hw_mode=g
 channel=6
 country_code=%s
+ieee80211d=1
 ieee80211n=1
 wmm_enabled=1
 auth_algs=1
@@ -284,6 +285,8 @@ wpa=2
 wpa_passphrase=%s
 wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
+ctrl_interface=/var/run/hostapd
+ctrl_interface_group=0
 `, cfg.LANInterface, cfg.APSSID, cfg.WifiCountry, cfg.APPassword)
 
 	if err := os.WriteFile("/etc/hostapd/hostapd.conf", []byte(conf), 0644); err != nil {
@@ -302,8 +305,15 @@ rsn_pairwise=CCMP
 }
 
 func activateHostapd() error {
+	cfg := GetRouterConfig()
+	if err := prepareWiFiAPInterface(cfg.LANInterface, cfg.WifiCountry); err != nil {
+		log.Printf("Bootstrap: prepare WiFi AP interface: %v", err)
+	}
 	if out, err := exec.Command("systemctl", "restart", "hostapd").CombinedOutput(); err != nil {
 		return fmt.Errorf("systemctl restart hostapd: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	if st := GetWiFiAPStatus(); !st.Beaconing {
+		log.Printf("Bootstrap: hostapd started but %s is not in AP mode yet; check iw/hostapd logs", cfg.LANInterface)
 	}
 	return nil
 }

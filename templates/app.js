@@ -105,10 +105,29 @@ function schedulePoll(fast) {
     pollTimer = setInterval(refresh, fast ? 1500 : 10000);
 }
 
+function renderWiFiAP(network) {
+    const el = document.getElementById("wifiApStatus");
+    const ap = network?.wifi_ap;
+    if (!ap?.enabled) {
+        el.textContent = "";
+        return;
+    }
+    const parts = [
+        `LAN WiFi AP: ${ap.ssid || "?"}`,
+        ap.beaconing ? "beaconing" : "not beaconing",
+        ap.hostapd_active ? "hostapd up" : "hostapd down"
+    ];
+    el.textContent = parts.join(" · ");
+    if (!ap.beaconing) {
+        el.textContent += ". Check country code, USB WiFi driver, and: systemctl status hostapd";
+    }
+}
+
 async function refresh() {
     try {
         const data = await fetchStatus();
         renderVPN(data.vpn);
+        renderWiFiAP(data.network);
         renderProfiles(data.profiles || [], data.vpn);
         document.getElementById("logTail").textContent = data.log_tail || "";
 
@@ -194,6 +213,7 @@ function editProfile(id) {
         document.getElementById("profileURL").value = p.server_url;
         document.getElementById("profilePin").value = p.servercert_pin;
         document.getElementById("savePassword").checked = p.save_password;
+        document.getElementById("noDTLS").checked = !!p.no_dtls;
         document.getElementById("profilePassword").value = "";
     });
 }
@@ -215,6 +235,7 @@ document.getElementById("profileForm").addEventListener("submit", async (e) => {
         server_url: document.getElementById("profileURL").value,
         servercert_pin: document.getElementById("profilePin").value,
         save_password: document.getElementById("savePassword").checked,
+        no_dtls: document.getElementById("noDTLS").checked,
         password: document.getElementById("profilePassword").value
     };
     const res = await fetch("/api/profiles", {

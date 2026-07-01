@@ -35,6 +35,7 @@ type NetworkSnapshot struct {
 	Packages      PackageSnapshot    `json:"packages"`
 	SuggestedLAN  SuggestedLANConfig `json:"suggested_lan"`
 	ManagementIPs []string           `json:"management_ips"`
+	WiFiAP        WiFiAPStatus       `json:"wifi_ap"`
 	Hostname      string             `json:"hostname"`
 	Configured    bool               `json:"configured"`
 	Config        RouterConfig       `json:"config"`
@@ -53,6 +54,7 @@ func GetNetworkSnapshot() NetworkSnapshot {
 		Packages:      GetPackageSnapshot(),
 		SuggestedLAN:  SuggestLANSubnet(defaultIface),
 		ManagementIPs: getManagementAccessIPs(),
+		WiFiAP:        GetWiFiAPStatus(),
 		Hostname:      getSystemHostname(),
 		Configured:    IsConfigured(),
 		Config:        GetRouterConfig(),
