@@ -18,14 +18,10 @@ var (
 	credentialsMu   sync.RWMutex
 )
 
+const sessionName = "vpn-connector-session"
+
 func init() {
-	secretKey := make([]byte, 32)
-	if _, err := rand.Read(secretKey); err != nil {
-		log.Fatal("Failed to generate session secret:", err)
-	}
-	if envSecret := os.Getenv("SESSION_SECRET"); envSecret != "" {
-		secretKey = []byte(envSecret)
-	}
+	secretKey := loadOrCreateSessionSecret()
 
 	store = sessions.NewCookieStore(secretKey)
 	store.Options = &sessions.Options{
@@ -42,6 +38,28 @@ func init() {
 	if p := os.Getenv("AUTH_PASSWORD"); p != "" {
 		defaultPassword = p
 	}
+}
+
+func loadOrCreateSessionSecret() []byte {
+	if envSecret := os.Getenv("SESSION_SECRET"); envSecret != "" {
+		return []byte(envSecret)
+	}
+
+	const secretFile = configDir + "/session.key"
+	if data, err := os.ReadFile(secretFile); err == nil && len(data) >= 32 {
+		return data
+	}
+
+	secretKey := make([]byte, 32)
+	if _, err := rand.Read(secretKey); err != nil {
+		log.Fatal("Failed to generate session secret:", err)
+	}
+	if err := os.MkdirAll(configDir, 0750); err == nil {
+		if err := os.WriteFile(secretFile, secretKey, 0600); err != nil {
+			log.Printf("Warning: could not persist session secret: %v", err)
+		}
+	}
+	return secretKey
 }
 
 func loadCredentialsFromConfig() {
@@ -105,10 +123,11 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := store.Get(r, "vpn-connector-session")
+	session, err := store.Get(r, sessionName)
 	if err != nil {
-		http.Error(w, "Error creating session", http.StatusInternalServerError)
-		return
+		// Stale cookie from before a service restart; replace on successful login.
+		log.Printf("Replacing invalid session cookie: %v", err)
+		session, _ = store.New(r, sessionName)
 	}
 	session.Values["authenticated"] = true
 	session.Values["username"] = username
@@ -120,7 +139,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	session, err := store.Get(r, "vpn-connector-session")
+	session, err := store.Get(r, sessionName)
 	if err != nil {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
@@ -148,7 +167,7 @@ func RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 
-		session, err := store.Get(r, "vpn-connector-session")
+		session, err := store.Get(r, sessionName)
 		if err != nil {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
