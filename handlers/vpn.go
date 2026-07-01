@@ -102,6 +102,23 @@ func GetVPNState() VPNState {
 	return st
 }
 
+func activeVPNServerURL() string {
+	return GetVPNState().ServerURL
+}
+
+func scheduleManagementMaintenance(serverURL string) {
+	go func() {
+		cfg := GetRouterConfig()
+		for _, delay := range []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second} {
+			time.Sleep(delay)
+			if !GetVPNState().Connected {
+				return
+			}
+			MaintainManagementAccess(cfg, serverURL)
+		}
+	}()
+}
+
 func saveVPNState(st VPNState) {
 	_ = os.MkdirAll(runDir, 0755)
 	data, _ := json.MarshalIndent(st, "", "  ")
@@ -347,6 +364,7 @@ func finishConnected(sess *vpnConn, tun string) {
 
 	ignoreTunInNetworkManager(tun)
 	_ = ApplyVPNNAT(tun)
+	scheduleManagementMaintenance(sess.profile.ServerURL)
 	st := VPNState{
 		Connected:   true,
 		Phase:       VPNPhaseConnected,

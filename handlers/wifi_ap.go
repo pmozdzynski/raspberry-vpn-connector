@@ -109,6 +109,14 @@ func EnsureWiFiAccessPoint() error {
 }
 
 func EnsureRouterServices() error {
+	cfg := GetRouterConfig()
+	st := GetVPNState()
+	if st.Connected {
+		MaintainManagementAccess(cfg, st.ServerURL)
+	} else {
+		MaintainManagementAccess(cfg, "")
+	}
+
 	if err := EnsureWiFiAccessPoint(); err != nil {
 		log.Printf("Ensure WiFi AP: %v", err)
 	}
