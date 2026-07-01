@@ -45,13 +45,14 @@ type VPNState struct {
 }
 
 type vpnConn struct {
-	cmd          *exec.Cmd
-	stdin        io.WriteCloser
-	profile      VPNProfile
-	stopCh       chan struct{}
-	passwordSent bool
-	inputSent    bool
-	parentDeadAt time.Time
+	cmd            *exec.Cmd
+	stdin          io.WriteCloser
+	profile        VPNProfile
+	stopCh         chan struct{}
+	passwordSent   bool
+	inputSent      bool
+	parentDeadAt   time.Time
+	connectApplied sync.Once
 }
 
 var (
@@ -396,41 +397,46 @@ func openConnectChildAlive() bool {
 }
 
 func finishConnected(sess *vpnConn, tun string) {
-	vpnMu.Lock()
-	if activeVPNSession != sess || !interfaceHasIPv4(tun) {
+	if sess == nil || !interfaceHasIPv4(tun) {
+		return
+	}
+	sess.connectApplied.Do(func() {
+		vpnMu.Lock()
+		if activeVPNSession != sess {
+			vpnMu.Unlock()
+			return
+		}
+		profile := sess.profile
 		vpnMu.Unlock()
-		return
-	}
-	profile := sess.profile
-	vpnMu.Unlock()
 
-	ignoreTunInNetworkManager(tun)
-	_ = ApplyVPNNAT(tun)
-	scheduleManagementMaintenance(profile.ServerURL)
+		ignoreTunInNetworkManager(tun)
+		_ = ApplyVPNNAT(tun)
+		scheduleManagementMaintenance(profile.ServerURL)
 
-	vpnMu.Lock()
-	defer vpnMu.Unlock()
-	if activeVPNSession != sess {
-		return
-	}
-	st := VPNState{
-		Connected:   true,
-		Phase:       VPNPhaseConnected,
-		ProfileID:   profile.ID,
-		ProfileName: profile.Name,
-		TunIface:    tun,
-		ServerURL:   profile.ServerURL,
-		Since:       time.Now().UTC().Format(time.RFC3339),
-	}
-	saveVPNState(st)
+		vpnMu.Lock()
+		defer vpnMu.Unlock()
+		if activeVPNSession != sess {
+			return
+		}
+		st := VPNState{
+			Connected:   true,
+			Phase:       VPNPhaseConnected,
+			ProfileID:   profile.ID,
+			ProfileName: profile.Name,
+			TunIface:    tun,
+			ServerURL:   profile.ServerURL,
+			Since:       time.Now().UTC().Format(time.RFC3339),
+		}
+		saveVPNState(st)
 
-	cfg := GetRouterConfig()
-	cfg.LastProfileID = profile.ID
-	_ = SaveRouterConfig(cfg)
+		cfg := GetRouterConfig()
+		cfg.LastProfileID = profile.ID
+		_ = SaveRouterConfig(cfg)
 
-	if pid := findOpenConnectPID(); pid > 0 {
-		writeOpenConnectPID(pid)
-	}
+		if pid := findOpenConnectPID(); pid > 0 {
+			writeOpenConnectPID(pid)
+		}
+	})
 }
 
 func ignoreTunInNetworkManager(iface string) {

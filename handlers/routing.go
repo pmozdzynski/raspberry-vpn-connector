@@ -318,8 +318,7 @@ func MaintainManagementAccess(cfg RouterConfig, serverURL string) {
 	protectManagementRules(cfg)
 	ensureConnectedSubnetRoutes(cfg)
 	ensureWANDefaultOnMain(cfg)
-	ensureWANInputAccess(cfg)
-	ensureLANInputAccess(cfg)
+	ensureManagementFirewall(cfg)
 	if serverURL != "" {
 		ensureVPNHostRouteViaWAN(cfg, serverURL)
 	}
@@ -418,26 +417,6 @@ func loosenReversePathFiltering(ifaces ...string) {
 			continue
 		}
 		_ = exec.Command("sysctl", "-w", "net.ipv4.conf."+iface+".rp_filter=2").Run()
-	}
-}
-
-func ensureWANInputAccess(cfg RouterConfig) {
-	if cfg.WANInterface == "" {
-		return
-	}
-	spec := []string{"-i", cfg.WANInterface, "-p", "tcp", "--dport", "5000", "-j", "ACCEPT"}
-	if exec.Command("iptables", append([]string{"-C", "INPUT"}, spec...)...).Run() != nil {
-		exec.Command("iptables", append([]string{"-I", "INPUT", "1"}, spec...)...).Run()
-	}
-}
-
-func ensureLANInputAccess(cfg RouterConfig) {
-	if cfg.LANInterface == "" {
-		return
-	}
-	spec := []string{"-i", cfg.LANInterface, "-p", "tcp", "--dport", "5000", "-j", "ACCEPT"}
-	if exec.Command("iptables", append([]string{"-C", "INPUT"}, spec...)...).Run() != nil {
-		exec.Command("iptables", append([]string{"-I", "INPUT", "1"}, spec...)...).Run()
 	}
 }
 

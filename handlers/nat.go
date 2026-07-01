@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	natChain = "VPN-CONNECTOR-NAT"
-	fwdChain = "VPN-CONNECTOR-FWD"
+	natChain   = "VPN-CONNECTOR-NAT"
+	fwdChain   = "VPN-CONNECTOR-FWD"
+	inputChain = "VPN-CONNECTOR-IN"
 )
 
 func ensureIPTablesChains() {
@@ -131,7 +132,7 @@ func ApplyVPNNAT(tunIface string) error {
 		ensureMSSClamp(wan)
 	}
 	ensureForwardAccept()
-	_ = ApplyVPNDNS()
+	go func() { _ = ApplyVPNDNS() }()
 	log.Printf("VPN NAT via %s + internet via %s (split-tunnel)", tunIface, wan)
 	return nil
 }
@@ -148,15 +149,39 @@ func EnsureIPForwarding() error {
 	if err := persistIPForwarding(); err != nil {
 		log.Printf("persist IP forwarding: %v", err)
 	}
-	ensureManagementPortOpen()
-	ensureLocalInputAccess(GetRouterConfig())
+	ensureManagementFirewall(GetRouterConfig())
 	return nil
 }
 
-func ensureManagementPortOpen() {
-	if exec.Command("iptables", "-C", "INPUT", "-p", "tcp", "--dport", "5000", "-j", "ACCEPT").Run() != nil {
-		exec.Command("iptables", "-I", "INPUT", "1", "-p", "tcp", "--dport", "5000", "-j", "ACCEPT").Run()
+func ensureManagementFirewall(cfg RouterConfig) {
+	exec.Command("iptables", "-N", inputChain).Run()
+	exec.Command("iptables", "-F", inputChain).Run()
+
+	rules := [][]string{
+		{"-i", "lo", "-j", "ACCEPT"},
+		{"-p", "tcp", "--dport", "5000", "-j", "ACCEPT"},
+		{"-p", "tcp", "--sport", "5000", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"},
 	}
+	for _, iface := range []string{cfg.WANInterface, cfg.LANInterface} {
+		if iface == "" {
+			continue
+		}
+		rules = append(rules,
+			[]string{"-i", iface, "-m", "addrtype", "--dst-type", "LOCAL", "-j", "ACCEPT"},
+			[]string{"-i", iface, "-p", "tcp", "--dport", "5000", "-j", "ACCEPT"},
+		)
+	}
+	for _, spec := range rules {
+		exec.Command("iptables", append([]string{"-A", inputChain}, spec...)...).Run()
+	}
+
+	// NetworkManager may insert INPUT rules when tun0 appears; keep our jump first.
+	_ = exec.Command("iptables", "-D", "INPUT", "-j", inputChain).Run()
+	exec.Command("iptables", "-I", "INPUT", "1", "-j", inputChain).Run()
+}
+
+func ensureManagementPortOpen() {
+	ensureManagementFirewall(GetRouterConfig())
 }
 
 func persistIPForwarding() error {
@@ -170,16 +195,4 @@ net.ipv4.conf.default.forwarding=1
 		return nil
 	}
 	return os.WriteFile(path, []byte(content), 0644)
-}
-
-func ensureLocalInputAccess(cfg RouterConfig) {
-	for _, iface := range []string{cfg.WANInterface, cfg.LANInterface} {
-		if iface == "" {
-			continue
-		}
-		spec := []string{"-i", iface, "-m", "addrtype", "--dst-type", "LOCAL", "-j", "ACCEPT"}
-		if exec.Command("iptables", append([]string{"-C", "INPUT"}, spec...)...).Run() != nil {
-			exec.Command("iptables", append([]string{"-I", "INPUT", "1"}, spec...)...).Run()
-		}
-	}
 }
