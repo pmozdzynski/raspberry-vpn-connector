@@ -126,32 +126,47 @@ func setupApplyStream(w http.ResponseWriter, cfg RouterConfig) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	send := func(status, step, detail string) {
-		payload, _ := json.Marshal(map[string]string{
+	send := func(status, step, detail string, extra map[string]interface{}) {
+		payload := map[string]interface{}{
 			"status": status,
 			"step":   step,
 			"detail": detail,
-		})
-		fmt.Fprintf(w, "data: %s\n\n", payload)
+		}
+		for k, v := range extra {
+			payload[k] = v
+		}
+		body, _ := json.Marshal(payload)
+		fmt.Fprintf(w, "data: %s\n\n", body)
 		flusher.Flush()
 	}
 
 	progress := setupProgressReporter(func(status, step, detail string) {
-		send(status, step, detail)
+		extra := map[string]interface{}{}
+		if status == "warn" && step == "management access" {
+			extra["access_urls"] = FormatManagementURLs(cfg)
+		}
+		if status == "ok" && step == "enable IP forwarding" {
+			extra["ip_forwarding"] = IsIPForwardingEnabled()
+		}
+		send(status, step, detail, extra)
 	})
 
 	if err := ApplyBootstrapWithProgress(cfg, progress); err != nil {
-		send("error", "", err.Error())
+		send("error", "", err.Error(), nil)
 		return
 	}
 
 	SetRuntimeCredentials(cfg.AdminUsername, cfg.AdminPassword)
-	ips := getManagementAccessIPs()
-	hint := "Open /login with your dashboard credentials"
-	if len(ips) > 0 {
-		hint = fmt.Sprintf("Dashboard: http://%s:5000/ (login: %s)", ips[0], cfg.AdminUsername)
+	forwarding := "off"
+	if IsIPForwardingEnabled() {
+		forwarding = "on"
 	}
-	send("done", "", fmt.Sprintf("Router configured. LAN AP %s on %s. %s", cfg.APSSID, cfg.LANInterface, hint))
+	doneDetail := fmt.Sprintf("Router configured. IP forwarding %s. LAN AP %s on %s. %s",
+		forwarding, cfg.APSSID, cfg.LANInterface, FormatManagementHint(cfg))
+	send("done", "", doneDetail, map[string]interface{}{
+		"access_urls":   FormatManagementURLs(cfg),
+		"ip_forwarding": IsIPForwardingEnabled(),
+	})
 }
 
 func writeSetupOK(w http.ResponseWriter, cfg RouterConfig) {

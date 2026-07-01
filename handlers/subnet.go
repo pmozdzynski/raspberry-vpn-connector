@@ -132,3 +132,33 @@ func getManagementAccessIPs() []string {
 	}
 	return ips
 }
+
+func FormatManagementURLs(cfg RouterConfig) []string {
+	seen := make(map[string]bool)
+	var urls []string
+	add := func(ip string) {
+		if ip == "" || seen[ip] {
+			return
+		}
+		seen[ip] = true
+		urls = append(urls, fmt.Sprintf("http://%s:5000/", ip))
+	}
+
+	if cfg.WANInterface != "" {
+		wanIP, _ := getInterfaceIPv4CIDR(cfg.WANInterface)
+		add(wanIP)
+	}
+	for _, ip := range getManagementAccessIPs() {
+		add(ip)
+	}
+	add(cfg.LANAddress)
+	return urls
+}
+
+func FormatManagementHint(cfg RouterConfig) string {
+	urls := FormatManagementURLs(cfg)
+	if len(urls) == 0 {
+		return "Open http://<device-ip>:5000/ on any interface with an IPv4 address"
+	}
+	return "Dashboard: " + strings.Join(urls, " or ")
+}

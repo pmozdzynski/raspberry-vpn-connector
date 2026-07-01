@@ -23,15 +23,35 @@ function usableInterfaces(snapshot) {
     return (snapshot.interfaces || []).filter(i => i.kind === "wireless" || i.kind === "ethernet");
 }
 
+function renderAccessUrls(snapshot) {
+    const el = document.getElementById("accessUrls");
+    const ips = snapshot.management_ips || [];
+    const forwarding = snapshot.routing?.ip_forwarding ? "on" : "off";
+    const lan = document.getElementById("lanAddress")?.value;
+    const links = [];
+    const seen = new Set();
+    const add = (ip) => {
+        if (!ip || seen.has(ip)) return;
+        seen.add(ip);
+        links.push(`<a href="http://${ip}:5000/setup" target="_blank" rel="noopener">http://${ip}:5000/</a>`);
+    };
+    ips.forEach(add);
+    add(lan);
+    const list = links.length
+        ? links.join("<br>")
+        : "<span class='muted'>Device IP not detected yet. Connect Ethernet or WiFi WAN first.</span>";
+    el.innerHTML = `<h3>Management access</h3><p>${list}</p><p class="muted small">IP forwarding: <strong>${forwarding}</strong> (enabled during setup)</p>`;
+}
+
 function renderNetworkSummary(snapshot) {
     const el = document.getElementById("networkSummary");
     const ifaces = usableInterfaces(snapshot);
-    const unused = (snapshot.interfaces || []).length - ifaces.length;
     const lines = ifaces.map(i => `<div>${ifaceLabel(i)}</div>`).join("");
     const note = ifaces.length >= 3
         ? `<p class="muted small">Choose WAN and LAN from ${ifaces.length} interfaces. ${ifaces.length - 2} will stay unused.</p>`
         : "";
     el.innerHTML = `<h3>Detected interfaces</h3>${lines || "<p class='muted'>No usable interfaces found</p>"}${note}`;
+    renderAccessUrls(snapshot);
 }
 
 function fillInterfaceSelects(snapshot, keepWan, keepLan) {
@@ -120,6 +140,11 @@ async function init() {
     document.getElementById("lanInterface").addEventListener("change", () => {
         updateRoleHints(lastSnapshot);
         updateLANMode(lastSnapshot);
+        renderAccessUrls(lastSnapshot);
+    });
+
+    document.getElementById("lanAddress").addEventListener("input", () => {
+        renderAccessUrls(lastSnapshot);
     });
 }
 
@@ -139,6 +164,12 @@ function appendLogLine(text, cssClass = "") {
 function formatLogEvent(evt) {
     const step = evt.step ? `[${evt.step}] ` : "";
     return `${step}${evt.detail || evt.status}`;
+}
+
+function appendAccessUrls(urls) {
+    if (!urls || !urls.length) return;
+    appendLogLine("Management URLs:", "log-warn");
+    urls.forEach((url) => appendLogLine("  " + url, "log-warn"));
 }
 
 document.getElementById("setupForm").addEventListener("submit", async (e) => {
@@ -206,14 +237,22 @@ document.getElementById("setupForm").addEventListener("submit", async (e) => {
                 appendLogLine(formatLogEvent(payload), "log-running");
             } else if (payload.status === "ok") {
                 appendLogLine("✓ " + formatLogEvent(payload), "log-ok");
+                if (payload.ip_forwarding === true) {
+                    appendLogLine("  IP forwarding: on", "log-ok");
+                }
             } else if (payload.status === "warn") {
                 appendLogLine("! " + formatLogEvent(payload), "log-warn");
+                appendAccessUrls(payload.access_urls);
             } else if (payload.status === "error") {
                 appendLogLine("✗ " + (payload.detail || payload.step || "error"), "log-error");
                 failed = true;
             } else if (payload.status === "done") {
                 appendLogLine("✓ " + payload.detail, "log-done");
-                setTimeout(() => { window.location.href = "/login"; }, 4000);
+                if (payload.ip_forwarding === true) {
+                    appendLogLine("  IP forwarding: on", "log-done");
+                }
+                appendAccessUrls(payload.access_urls);
+                setTimeout(() => { window.location.href = "/login"; }, 8000);
                 return;
             }
         }

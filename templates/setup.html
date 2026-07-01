@@ -12,6 +12,7 @@
         <p class="muted">Pick two interfaces from those detected below. WAN is internet (WiFi or cable). LAN is your local network (WiFi AP or Ethernet). Any third interface stays unused.</p>
 
         <div id="networkSummary" class="status-box"></div>
+        <div id="accessUrls" class="status-box hint-box"></div>
 
         <form id="setupForm" class="profile-form">
             <label>WAN interface (internet)
@@ -39,6 +40,7 @@
 
             <div id="wifiApSection">
                 <h4>WiFi access point (LAN is wireless)</h4>
+                <p class="muted small">Use Ethernet on WAN during setup if possible. When the AP starts, reconnect via WAN IP or join the AP below and open the LAN gateway URL.</p>
                 <label>WiFi AP SSID
                     <input type="text" id="apSSID" value="vpn-connector">
                 </label>

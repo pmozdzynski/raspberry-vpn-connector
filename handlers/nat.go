@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"log"
+	"os"
 	"os/exec"
 )
 
@@ -86,5 +87,28 @@ func EnsureIPForwarding() error {
 	for k, v := range settings {
 		exec.Command("sysctl", "-w", k+"="+v).Run()
 	}
+	if err := persistIPForwarding(); err != nil {
+		log.Printf("persist IP forwarding: %v", err)
+	}
+	ensureManagementPortOpen()
 	return nil
+}
+
+func persistIPForwarding() error {
+	const path = "/etc/sysctl.d/99-vpn-connector.conf"
+	content := `# Managed by vpn-connector
+net.ipv4.ip_forward=1
+net.ipv4.conf.all.forwarding=1
+net.ipv4.conf.default.forwarding=1
+`
+	if existing, err := os.ReadFile(path); err == nil && string(existing) == content {
+		return nil
+	}
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
+func ensureManagementPortOpen() {
+	if exec.Command("iptables", "-C", "INPUT", "-p", "tcp", "--dport", "5000", "-j", "ACCEPT").Run() != nil {
+		exec.Command("iptables", "-I", "INPUT", "1", "-p", "tcp", "--dport", "5000", "-j", "ACCEPT").Run()
+	}
 }

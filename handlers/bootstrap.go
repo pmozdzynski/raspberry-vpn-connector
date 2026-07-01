@@ -78,7 +78,7 @@ func ApplyBootstrapWithProgress(cfg RouterConfig, progress setupProgressReporter
 		steps = append(steps, struct {
 			name string
 			fn   func() error
-		}{"configure WiFi access point", func() error { return configureHostapd(cfg) }})
+		}{"prepare WiFi access point", func() error { return prepareHostapd(cfg) }})
 	} else {
 		steps = append(steps, struct {
 			name string
@@ -99,6 +99,9 @@ func ApplyBootstrapWithProgress(cfg RouterConfig, progress setupProgressReporter
 			return fmt.Errorf("%s: %w", step.name, err)
 		}
 		progress.ok(step.name, "completed")
+		if step.name == "configure LAN interface" {
+			progress.warn("management access", FormatManagementHint(cfg))
+		}
 	}
 
 	progress.running("save configuration", "writing /etc/vpn-connector/config.json")
@@ -115,6 +118,19 @@ func ApplyBootstrapWithProgress(cfg RouterConfig, progress setupProgressReporter
 		return err
 	}
 	progress.ok("initial routing", "direct NAT active")
+
+	if cfg.LANType == "wireless" {
+		progress.running("start WiFi access point", "activating hostapd (WAN management should stay up)")
+		if err := ensureWANReachable(cfg); err != nil {
+			progress.warn("start WiFi access point", err.Error())
+		}
+		if err := activateHostapd(); err != nil {
+			progress.fail("start WiFi access point", err.Error())
+			return fmt.Errorf("start WiFi access point: %w", err)
+		}
+		progress.ok("start WiFi access point", "completed")
+		progress.warn("management access", FormatManagementHint(cfg)+". If WiFi WAN dropped, use Ethernet WAN or connect to the LAN AP and open the LAN gateway URL.")
+	}
 
 	log.Printf("Bootstrap completed: WAN %s (%s), LAN %s (%s)", cfg.WANInterface, cfg.WANType, cfg.LANInterface, cfg.LANType)
 	return nil
@@ -249,7 +265,7 @@ func applyStaticIPAddress(iface, cidr string) error {
 	return nil
 }
 
-func configureHostapd(cfg RouterConfig) error {
+func prepareHostapd(cfg RouterConfig) error {
 	if err := ensureHostapdInstalled(); err != nil {
 		return err
 	}
@@ -282,10 +298,41 @@ rsn_pairwise=CCMP
 
 	exec.Command("systemctl", "unmask", "hostapd").Run()
 	exec.Command("systemctl", "enable", "hostapd").Run()
+	return nil
+}
+
+func activateHostapd() error {
 	if out, err := exec.Command("systemctl", "restart", "hostapd").CombinedOutput(); err != nil {
 		return fmt.Errorf("systemctl restart hostapd: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func ensureWANReachable(cfg RouterConfig) error {
+	if cfg.WANInterface == "" {
+		return nil
+	}
+	exec.Command("ip", "link", "set", cfg.WANInterface, "up").Run()
+	wanIP, _ := getInterfaceIPv4CIDR(cfg.WANInterface)
+	if wanIP != "" {
+		log.Printf("Bootstrap: WAN %s reachable at %s before starting AP", cfg.WANInterface, wanIP)
+		return nil
+	}
+	kind := cfg.WANType
+	if kind == "" {
+		kind = ResolveInterfaceKind(cfg.WANInterface)
+	}
+	if kind == "wireless" {
+		return fmt.Errorf("WAN %s has no IPv4; prefer Ethernet for setup access while the LAN AP starts", cfg.WANInterface)
+	}
+	return fmt.Errorf("WAN %s has no IPv4 yet", cfg.WANInterface)
+}
+
+func configureHostapd(cfg RouterConfig) error {
+	if err := prepareHostapd(cfg); err != nil {
+		return err
+	}
+	return activateHostapd()
 }
 
 func disableHostapd() error {
