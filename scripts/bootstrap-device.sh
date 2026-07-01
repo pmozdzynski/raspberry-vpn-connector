@@ -26,6 +26,41 @@ log() {
 	echo "==> $1"
 }
 
+repo_is_complete() {
+	[ -f "$REPO_DIR/go.mod" ] && [ -f "$REPO_DIR/main.go" ] && [ -f "$REPO_DIR/scripts/install.sh" ]
+}
+
+clone_or_update_repo() {
+	if [ -d "$REPO_DIR/.git" ]; then
+		if ! repo_is_complete; then
+			log "Incomplete checkout at $REPO_DIR; removing and re-cloning"
+			rm -rf "$REPO_DIR"
+		else
+			log "Updating existing repo at $REPO_DIR"
+			git -C "$REPO_DIR" fetch --depth 1 origin "$BRANCH"
+			git -C "$REPO_DIR" checkout -f "$BRANCH"
+			git -C "$REPO_DIR" reset --hard "origin/$BRANCH"
+			if ! repo_is_complete; then
+				log "Update did not produce a complete tree; re-cloning"
+				rm -rf "$REPO_DIR"
+			else
+				return
+			fi
+		fi
+	fi
+
+	log "Cloning $REPO_URL (branch $BRANCH) into $REPO_DIR"
+	mkdir -p "$(dirname "$REPO_DIR")"
+	git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$REPO_DIR"
+
+	if ! repo_is_complete; then
+		echo "Clone succeeded but source tree is incomplete (missing go.mod/main.go)." >&2
+		echo "The remote branch may not contain application source yet." >&2
+		echo "Expected: $REPO_URL branch $BRANCH" >&2
+		echo "Remove $REPO_DIR and retry after the repository is updated." >&2
+		exit 1
+	fi
+}
 detect_goarm() {
 	case "$(uname -m)" in
 		armv6l) echo "6" ;;
@@ -53,20 +88,6 @@ install_base_packages() {
 			git curl ca-certificates \
 			golang \
 			dnsmasq openconnect iptables iproute2 hostapd
-}
-
-clone_or_update_repo() {
-	if [ -d "$REPO_DIR/.git" ]; then
-		log "Updating existing repo at $REPO_DIR"
-		git -C "$REPO_DIR" fetch origin
-		git -C "$REPO_DIR" checkout "$BRANCH"
-		git -C "$REPO_DIR" pull --ff-only origin "$BRANCH" || true
-		return
-	fi
-
-	log "Cloning $REPO_URL into $REPO_DIR"
-	mkdir -p "$(dirname "$REPO_DIR")"
-	git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$REPO_DIR"
 }
 
 build_binary() {
