@@ -152,28 +152,43 @@ func configureLANInterface(cfg RouterConfig) error {
 		return configureNMEthernetLAN(cfg.LANInterface, cidr)
 	}
 
-	block := fmt.Sprintf("\ninterface %s\nstatic ip_address=%s\n", cfg.LANInterface, cidr)
-	return appendUniqueBlock("/etc/dhcpcd.conf", "interface "+cfg.LANInterface, block, func() error {
-		return exec.Command("systemctl", "restart", "dhcpcd").Run()
-	})
+	if dhcpcdUsable() {
+		block := fmt.Sprintf("\ninterface %s\nstatic ip_address=%s\n", cfg.LANInterface, cidr)
+		if err := appendUniqueBlock("/etc/dhcpcd.conf", "interface "+cfg.LANInterface, block, restartDhcpcd); err != nil {
+			log.Printf("Bootstrap: dhcpcd LAN config failed, falling back to ip: %v", err)
+			return applyStaticIPAddress(cfg.LANInterface, cidr)
+		}
+		return ensureLANAddress(cfg.LANInterface, cidr)
+	}
+
+	return applyStaticIPAddress(cfg.LANInterface, cidr)
 }
 
 func configureWirelessLANInterface(iface, cidr string) error {
 	if usesNetworkManager() {
-		_ = exec.Command("nmcli", "device", "set", iface, "managed", "no").Run()
+		if out, err := exec.Command("nmcli", "device", "set", iface, "managed", "no").CombinedOutput(); err != nil {
+			log.Printf("Bootstrap: nmcli device set managed no: %v: %s", err, strings.TrimSpace(string(out)))
+		}
+		return applyStaticIPAddress(iface, cidr)
 	}
-	block := fmt.Sprintf("\ninterface %s\nstatic ip_address=%s\nnohook wpa_supplicant\n", iface, cidr)
-	if commandExists("dhcpcd") {
-		return appendUniqueBlock("/etc/dhcpcd.conf", "interface "+iface, block, func() error {
-			return exec.Command("systemctl", "restart", "dhcpcd").Run()
-		})
+
+	if dhcpcdUsable() {
+		block := fmt.Sprintf("\ninterface %s\nstatic ip_address=%s\nnohook wpa_supplicant\n", iface, cidr)
+		if err := appendUniqueBlock("/etc/dhcpcd.conf", "interface "+iface, block, restartDhcpcd); err != nil {
+			log.Printf("Bootstrap: dhcpcd wireless LAN config failed, falling back to ip: %v", err)
+			return applyStaticIPAddress(iface, cidr)
+		}
+		return ensureLANAddress(iface, cidr)
 	}
+
 	return applyStaticIPAddress(iface, cidr)
 }
 
 func configureNMEthernetLAN(iface, cidr string) error {
 	connName := "vpn-connector-lan"
+	_ = exec.Command("nmcli", "device", "disconnect", iface).Run()
 	_ = exec.Command("nmcli", "con", "delete", connName).Run()
+
 	cmd := exec.Command("nmcli", "con", "add", "type", "ethernet",
 		"ifname", iface,
 		"con-name", connName,
@@ -183,12 +198,44 @@ func configureNMEthernetLAN(iface, cidr string) error {
 		"connection.autoconnect", "yes",
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%v: %s", err, string(out))
+		log.Printf("Bootstrap: nmcli con add failed, falling back to ip: %v: %s", err, strings.TrimSpace(string(out)))
+		return applyStaticIPAddress(iface, cidr)
 	}
 	if out, err := exec.Command("nmcli", "con", "up", connName).CombinedOutput(); err != nil {
-		return fmt.Errorf("%v: %s", err, string(out))
+		nmOut := strings.TrimSpace(string(out))
+		log.Printf("Bootstrap: nmcli con up failed, falling back to ip: %v: %s", err, nmOut)
+		if ipErr := applyStaticIPAddress(iface, cidr); ipErr != nil {
+			return fmt.Errorf("nmcli con up: %v: %s; ip fallback: %w", err, nmOut, ipErr)
+		}
+	}
+	return ensureLANAddress(iface, cidr)
+}
+
+func dhcpcdUsable() bool {
+	if !commandExists("dhcpcd") {
+		return false
+	}
+	if exec.Command("systemctl", "is-active", "--quiet", "dhcpcd").Run() == nil {
+		return true
+	}
+	return exec.Command("systemctl", "is-enabled", "--quiet", "dhcpcd").Run() == nil
+}
+
+func restartDhcpcd() error {
+	out, err := exec.Command("systemctl", "restart", "dhcpcd").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func ensureLANAddress(iface, cidr string) error {
+	wantIP := strings.Split(cidr, "/")[0]
+	out, err := exec.Command("ip", "-4", "-o", "addr", "show", "dev", iface).Output()
+	if err == nil && strings.Contains(string(out), wantIP) {
+		return nil
+	}
+	return applyStaticIPAddress(iface, cidr)
 }
 
 func applyStaticIPAddress(iface, cidr string) error {
@@ -196,7 +243,7 @@ func applyStaticIPAddress(iface, cidr string) error {
 	exec.Command("ip", "link", "set", iface, "up").Run()
 	if out, err := exec.Command("ip", "addr", "add", cidr, "dev", iface).CombinedOutput(); err != nil {
 		if !strings.Contains(string(out), "File exists") {
-			return fmt.Errorf("%v: %s", err, string(out))
+			return fmt.Errorf("ip addr add %s dev %s: %v: %s", cidr, iface, err, strings.TrimSpace(string(out)))
 		}
 	}
 	return nil
