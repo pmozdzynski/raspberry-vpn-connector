@@ -219,14 +219,82 @@ func ensureConnectedSubnetRoutes(cfg RouterConfig) {
 			if netAddr := networkAddr(wanIP, prefix); netAddr != nil {
 				subnet := fmt.Sprintf("%s/%d", netAddr.String(), prefix)
 				_ = exec.Command("ip", "route", "replace", subnet, "dev", cfg.WANInterface,
-					"proto", "kernel", "scope", "link", "src", wanIP).Run()
+					"proto", "kernel", "scope", "link", "src", wanIP, "metric", "1").Run()
+				_ = exec.Command("ip", "route", "replace", wanIP+"/32", "dev", cfg.WANInterface,
+					"scope", "link", "metric", "1").Run()
 			}
 		}
 	}
 	if cfg.LANInterface != "" {
 		if subnet := lanSubnetCIDR(cfg); subnet != "" && cfg.LANAddress != "" {
 			_ = exec.Command("ip", "route", "replace", subnet, "dev", cfg.LANInterface,
-				"proto", "kernel", "scope", "link", "src", cfg.LANAddress).Run()
+				"proto", "kernel", "scope", "link", "src", cfg.LANAddress, "metric", "1").Run()
+			_ = exec.Command("ip", "route", "replace", cfg.LANAddress+"/32", "dev", cfg.LANInterface,
+				"scope", "link", "metric", "1").Run()
+		}
+	}
+}
+
+func routeOverlapsLocal(dest string, localSubnet string) bool {
+	if dest == "" || dest == "default" || localSubnet == "" {
+		return false
+	}
+	_, localNet, err := net.ParseCIDR(localSubnet)
+	if err != nil {
+		return false
+	}
+	var destNet *net.IPNet
+	if strings.Contains(dest, "/") {
+		_, destNet, err = net.ParseCIDR(dest)
+	} else {
+		ip := net.ParseIP(dest)
+		if ip == nil {
+			return false
+		}
+		bits := 32
+		if ip.To4() == nil {
+			bits = 128
+		}
+		destNet = &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)}
+	}
+	if err != nil || destNet == nil {
+		return false
+	}
+	return localNet.Contains(destNet.IP) || destNet.Contains(localNet.IP)
+}
+
+func removeVPNRoutesOverlappingLocal(cfg RouterConfig, tunIface string) {
+	if tunIface == "" {
+		return
+	}
+	localSubnets := make([]string, 0, 2)
+	if subnet := wanSubnetCIDR(cfg.WANInterface); subnet != "" {
+		localSubnets = append(localSubnets, subnet)
+	}
+	if subnet := lanSubnetCIDR(cfg); subnet != "" {
+		localSubnets = append(localSubnets, subnet)
+	}
+	if len(localSubnets) == 0 {
+		return
+	}
+
+	out, err := exec.Command("ip", "route", "show", "dev", tunIface).Output()
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		dest := strings.Fields(line)[0]
+		for _, local := range localSubnets {
+			if routeOverlapsLocal(dest, local) {
+				if err := exec.Command("ip", "route", "del", line).Run(); err == nil {
+					log.Printf("Removed VPN route overlapping local network: %s", line)
+				}
+				break
+			}
 		}
 	}
 }
@@ -254,6 +322,9 @@ func MaintainManagementAccess(cfg RouterConfig, serverURL string) {
 	ensureLANInputAccess(cfg)
 	if serverURL != "" {
 		ensureVPNHostRouteViaWAN(cfg, serverURL)
+	}
+	if st := GetVPNState(); st.Connected && st.TunIface != "" {
+		removeVPNRoutesOverlappingLocal(cfg, st.TunIface)
 	}
 	loosenReversePathFiltering(cfg.WANInterface, cfg.LANInterface)
 }
@@ -304,6 +375,7 @@ func StopManagementWatchdog() {
 func ApplyVPNPolicyRouting(cfg RouterConfig, tunIface string, serverURL string) error {
 	flushVPNPolicyRouting(cfg)
 	MaintainManagementAccess(cfg, serverURL)
+	removeVPNRoutesOverlappingLocal(cfg, tunIface)
 	loosenReversePathFiltering(cfg.WANInterface, cfg.LANInterface, tunIface)
 	logTunnelRoutes(tunIface)
 	log.Printf("VPN routing: Fortinet split routes on main (vpnc-script); forward LAN -> %s", tunIface)

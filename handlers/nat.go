@@ -35,8 +35,20 @@ func appendForward(args ...string) {
 }
 
 func appendNAT(outIface string) {
+	appendNATFromSource("", outIface)
+}
+
+func appendNATFromSource(srcCIDR, outIface string) {
+	if outIface == "" {
+		return
+	}
 	ensureIPTablesChains()
-	exec.Command("iptables", "-t", "nat", "-A", natChain, "-o", outIface, "-j", "MASQUERADE").Run()
+	args := []string{"-t", "nat", "-A", natChain}
+	if srcCIDR != "" {
+		args = append(args, "-s", srcCIDR)
+	}
+	args = append(args, "-o", outIface, "-j", "MASQUERADE")
+	exec.Command("iptables", args...).Run()
 }
 
 func ensureForwardAccept() {
@@ -72,7 +84,7 @@ func ApplyDirectNAT() error {
 		}
 	}
 
-	appendNAT(wan)
+	appendNATFromSource(lanSubnetCIDR(cfg), wan)
 	lan := cfg.LANInterface
 	if lan != "" {
 		appendForward("-i", lan, "-o", wan, "-j", "ACCEPT")
@@ -101,8 +113,14 @@ func ApplyVPNNAT(tunIface string) error {
 		}
 	}
 
-	appendNAT(tunIface)
-	appendNAT(wan)
+	lanCIDR := lanSubnetCIDR(cfg)
+	if lanCIDR != "" {
+		appendNATFromSource(lanCIDR, tunIface)
+		appendNATFromSource(lanCIDR, wan)
+	} else {
+		appendNAT(tunIface)
+		appendNAT(wan)
+	}
 	lan := cfg.LANInterface
 	if lan != "" {
 		appendForward("-i", lan, "-o", tunIface, "-j", "ACCEPT")
@@ -131,7 +149,14 @@ func EnsureIPForwarding() error {
 		log.Printf("persist IP forwarding: %v", err)
 	}
 	ensureManagementPortOpen()
+	ensureLocalInputAccess(GetRouterConfig())
 	return nil
+}
+
+func ensureManagementPortOpen() {
+	if exec.Command("iptables", "-C", "INPUT", "-p", "tcp", "--dport", "5000", "-j", "ACCEPT").Run() != nil {
+		exec.Command("iptables", "-I", "INPUT", "1", "-p", "tcp", "--dport", "5000", "-j", "ACCEPT").Run()
+	}
 }
 
 func persistIPForwarding() error {
@@ -147,8 +172,14 @@ net.ipv4.conf.default.forwarding=1
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
-func ensureManagementPortOpen() {
-	if exec.Command("iptables", "-C", "INPUT", "-p", "tcp", "--dport", "5000", "-j", "ACCEPT").Run() != nil {
-		exec.Command("iptables", "-I", "INPUT", "1", "-p", "tcp", "--dport", "5000", "-j", "ACCEPT").Run()
+func ensureLocalInputAccess(cfg RouterConfig) {
+	for _, iface := range []string{cfg.WANInterface, cfg.LANInterface} {
+		if iface == "" {
+			continue
+		}
+		spec := []string{"-i", iface, "-m", "addrtype", "--dst-type", "LOCAL", "-j", "ACCEPT"}
+		if exec.Command("iptables", append([]string{"-C", "INPUT"}, spec...)...).Run() != nil {
+			exec.Command("iptables", append([]string{"-I", "INPUT", "1"}, spec...)...).Run()
+		}
 	}
 }
