@@ -155,17 +155,18 @@ func StartConnect(profileID, password string) error {
 		"-u", profile.Username,
 		"--servercert", profile.ServerCertPin,
 		"--passwd-on-stdin",
-		"--logfile=" + logFile,
 		"--no-dtls",
 		profile.ServerURL,
 	}
 
 	cmd := exec.Command("openconnect", args...)
 	cmd.Stdin = stdinReader
-	cmd.Stdout = io.Discard
 	logOut, _ := os.OpenFile(logFile, os.O_APPEND|os.O_WRONLY, 0644)
 	if logOut != nil {
+		cmd.Stdout = logOut
 		cmd.Stderr = logOut
+	} else {
+		cmd.Stdout = io.Discard
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
