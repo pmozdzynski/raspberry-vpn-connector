@@ -170,7 +170,35 @@ func ensureConnectedSubnetRoutes(cfg RouterConfig) {
 	}
 }
 
+func flushLegacyManagementRules(cfg RouterConfig) {
+	if cfg.WANInterface != "" {
+		wanIP, _ := getInterfaceIPv4CIDR(cfg.WANInterface)
+		if wanIP != "" {
+			host := wanIP + "/32"
+			_ = exec.Command("ip", "rule", "del", "to", host, "lookup", "main", "priority", "43").Run()
+			_ = exec.Command("ip", "rule", "del", "from", host, "lookup", "main", "priority", "49").Run()
+		}
+		if subnet := wanSubnetCIDR(cfg.WANInterface); subnet != "" {
+			_ = exec.Command("ip", "rule", "del", "from", subnet, "lookup", "main", "priority", "50").Run()
+			_ = exec.Command("ip", "rule", "del", "to", subnet, "lookup", "main", "priority", "51").Run()
+		}
+	}
+	if cfg.LANAddress != "" {
+		host := cfg.LANAddress + "/32"
+		_ = exec.Command("ip", "rule", "del", "to", host, "lookup", "main", "priority", "44").Run()
+		_ = exec.Command("ip", "rule", "del", "from", host, "lookup", "main", "priority", "44").Run()
+	}
+	if subnet := lanSubnetCIDR(cfg); subnet != "" {
+		_ = exec.Command("ip", "rule", "del", "to", subnet, "lookup", "main", "priority", "45").Run()
+	}
+	if cfg.LANInterface != "" {
+		table := strconv.Itoa(vpnPolicyTableID)
+		_ = exec.Command("ip", "rule", "del", "iif", cfg.LANInterface, "lookup", table).Run()
+	}
+}
+
 func MaintainManagementAccess(cfg RouterConfig, serverURL string) {
+	flushLegacyManagementRules(cfg)
 	ensureConnectedSubnetRoutes(cfg)
 	ensureWANDefaultOnMain(cfg)
 	ensureWANInputAccess(cfg)

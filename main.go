@@ -50,6 +50,7 @@ func main() {
 	})
 
 	http.HandleFunc("/status", handlers.RequireAuth(handlers.StatusHandler))
+	http.HandleFunc("/api/status", handlers.RequireAuth(handlers.StatusHandler))
 	http.HandleFunc("/api/profiles", handlers.RequireAuth(handlers.ProfilesHandler))
 	http.HandleFunc("/api/vpn/connect", handlers.RequireAuth(handlers.VPNConnectHandler))
 	http.HandleFunc("/api/vpn/input", handlers.RequireAuth(handlers.VPNInputHandler))

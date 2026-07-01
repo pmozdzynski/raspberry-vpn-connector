@@ -403,30 +403,35 @@ func openConnectChildAlive() bool {
 
 func finishConnected(sess *vpnConn, tun string) {
 	vpnMu.Lock()
+	if activeVPNSession != sess || !interfaceHasIPv4(tun) {
+		vpnMu.Unlock()
+		return
+	}
+	profile := sess.profile
+	vpnMu.Unlock()
+
+	ignoreTunInNetworkManager(tun)
+	_ = ApplyVPNNAT(tun)
+	scheduleManagementMaintenance(profile.ServerURL)
+
+	vpnMu.Lock()
 	defer vpnMu.Unlock()
 	if activeVPNSession != sess {
 		return
 	}
-	if !interfaceHasIPv4(tun) {
-		return
-	}
-
-	ignoreTunInNetworkManager(tun)
-	_ = ApplyVPNNAT(tun)
-	scheduleManagementMaintenance(sess.profile.ServerURL)
 	st := VPNState{
 		Connected:   true,
 		Phase:       VPNPhaseConnected,
-		ProfileID:   sess.profile.ID,
-		ProfileName: sess.profile.Name,
+		ProfileID:   profile.ID,
+		ProfileName: profile.Name,
 		TunIface:    tun,
-		ServerURL:   sess.profile.ServerURL,
+		ServerURL:   profile.ServerURL,
 		Since:       time.Now().UTC().Format(time.RFC3339),
 	}
 	saveVPNState(st)
 
 	cfg := GetRouterConfig()
-	cfg.LastProfileID = sess.profile.ID
+	cfg.LastProfileID = profile.ID
 	_ = SaveRouterConfig(cfg)
 
 	if pid := findOpenConnectPID(); pid > 0 {
@@ -448,24 +453,31 @@ func watchOpenConnectProcess(sess *vpnConn) {
 	}
 
 	vpnMu.Lock()
-	defer vpnMu.Unlock()
-
 	if activeVPNSession != sess {
+		vpnMu.Unlock()
+		return
+	}
+	tun := detectTunInterface()
+	childPID := 0
+	if tunnelReady(tun) {
+		childPID = findOpenConnectPID()
+	}
+	vpnMu.Unlock()
+
+	if childPID > 0 {
+		writeOpenConnectPID(childPID)
+		ignoreTunInNetworkManager(tun)
+		finishConnected(sess, tun)
+		log.Printf("openconnect parent exited (%v); tracking pid %d", waitErr, childPID)
+		go watchOpenConnectPID(sess, childPID)
 		return
 	}
 
-	tun := detectTunInterface()
-	if tunnelReady(tun) {
-		if pid := findOpenConnectPID(); pid > 0 {
-			writeOpenConnectPID(pid)
-			ignoreTunInNetworkManager(tun)
-			finishConnected(sess, tun)
-			log.Printf("openconnect parent exited (%v); tracking pid %d", waitErr, pid)
-			go watchOpenConnectPID(sess, pid)
-			return
-		}
+	vpnMu.Lock()
+	defer vpnMu.Unlock()
+	if activeVPNSession != sess {
+		return
 	}
-
 	handleOpenConnectStopped(sess, waitErr)
 }
 
