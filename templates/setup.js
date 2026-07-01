@@ -123,20 +123,32 @@ async function init() {
     });
 }
 
-function appendProgress(status, step, detail) {
-    const log = document.getElementById("progressLog");
-    const line = document.createElement("div");
-    line.className = "progress-line " + status;
-    line.textContent = [step, detail].filter(Boolean).join(": ");
-    log.appendChild(line);
+function appendLogLine(text, cssClass = "") {
+    const log = document.getElementById("setupLog");
+    const panel = document.getElementById("setupLogPanel");
+    panel.hidden = false;
+    const span = document.createElement("span");
+    if (cssClass) {
+        span.className = cssClass;
+    }
+    span.textContent = text + "\n";
+    log.appendChild(span);
     log.scrollTop = log.scrollHeight;
+}
+
+function formatLogEvent(evt) {
+    const step = evt.step ? `[${evt.step}] ` : "";
+    return `${step}${evt.detail || evt.status}`;
 }
 
 document.getElementById("setupForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = document.getElementById("applyBtn");
+    const form = document.getElementById("setupForm");
     btn.disabled = true;
-    document.getElementById("progressLog").innerHTML = "";
+    btn.textContent = "Installing...";
+    document.getElementById("setupLog").textContent = "";
+    form.style.opacity = "0.55";
 
     const body = {
         wan_interface: document.getElementById("wanInterface").value,
@@ -161,34 +173,56 @@ document.getElementById("setupForm").addEventListener("submit", async (e) => {
         body: JSON.stringify(body)
     });
 
-    if (!res.ok) {
-        appendProgress("error", "", await res.text());
+    if (!res.ok && !res.body) {
+        appendLogLine(await res.text() || "Setup failed", "log-error");
         btn.disabled = false;
+        btn.textContent = "Apply configuration";
+        form.style.opacity = "1";
         return;
     }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let failed = false;
 
     while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split("\n\n");
-        buffer = parts.pop();
+        buffer = parts.pop() || "";
         for (const part of parts) {
             const line = part.split("\n").find(l => l.startsWith("data: "));
             if (!line) continue;
-            const payload = JSON.parse(line.slice(6));
-            appendProgress(payload.status, payload.step, payload.detail);
-            if (payload.status === "done") {
-                setTimeout(() => { window.location.href = "/login"; }, 1500);
+            let payload;
+            try {
+                payload = JSON.parse(line.slice(6));
+            } catch {
+                continue;
             }
-            if (payload.status === "error") {
-                btn.disabled = false;
+
+            if (payload.status === "running") {
+                appendLogLine(formatLogEvent(payload), "log-running");
+            } else if (payload.status === "ok") {
+                appendLogLine("✓ " + formatLogEvent(payload), "log-ok");
+            } else if (payload.status === "warn") {
+                appendLogLine("! " + formatLogEvent(payload), "log-warn");
+            } else if (payload.status === "error") {
+                appendLogLine("✗ " + (payload.detail || payload.step || "error"), "log-error");
+                failed = true;
+            } else if (payload.status === "done") {
+                appendLogLine("✓ " + payload.detail, "log-done");
+                setTimeout(() => { window.location.href = "/login"; }, 4000);
+                return;
             }
         }
+    }
+
+    if (failed) {
+        btn.disabled = false;
+        btn.textContent = "Apply configuration";
+        form.style.opacity = "1";
     }
 });
 

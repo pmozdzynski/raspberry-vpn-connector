@@ -144,36 +144,62 @@ func configureLANInterface(cfg RouterConfig) error {
 		lanType = ResolveInterfaceKind(cfg.LANInterface)
 	}
 
+	if lanType == "wireless" {
+		return configureWirelessLANInterface(cfg.LANInterface, cidr)
+	}
+
 	if usesNetworkManager() {
-		connName := "vpn-connector-lan"
-		_ = exec.Command("nmcli", "con", "delete", connName).Run()
-
-		args := []string{"con", "add", "ifname", cfg.LANInterface, "con-name", connName,
-			"ipv4.method", "manual", "ipv4.addresses", cidr, "ipv6.method", "ignore", "connection.autoconnect", "yes",
-		}
-		if lanType == "wireless" {
-			args = append([]string{"type", "wifi"}, args...)
-			args = append(args, "802-11-wireless.mode", "ap")
-		} else {
-			args = append([]string{"type", "ethernet"}, args...)
-		}
-
-		if out, err := exec.Command("nmcli", args...).CombinedOutput(); err != nil {
-			return fmt.Errorf("%v: %s", err, string(out))
-		}
-		if out, err := exec.Command("nmcli", "con", "up", connName).CombinedOutput(); err != nil {
-			return fmt.Errorf("%v: %s", err, string(out))
-		}
-		return nil
+		return configureNMEthernetLAN(cfg.LANInterface, cidr)
 	}
 
 	block := fmt.Sprintf("\ninterface %s\nstatic ip_address=%s\n", cfg.LANInterface, cidr)
-	if lanType == "wireless" {
-		block += "nohook wpa_supplicant\n"
-	}
 	return appendUniqueBlock("/etc/dhcpcd.conf", "interface "+cfg.LANInterface, block, func() error {
 		return exec.Command("systemctl", "restart", "dhcpcd").Run()
 	})
+}
+
+func configureWirelessLANInterface(iface, cidr string) error {
+	if usesNetworkManager() {
+		_ = exec.Command("nmcli", "device", "set", iface, "managed", "no").Run()
+	}
+	block := fmt.Sprintf("\ninterface %s\nstatic ip_address=%s\nnohook wpa_supplicant\n", iface, cidr)
+	if commandExists("dhcpcd") {
+		return appendUniqueBlock("/etc/dhcpcd.conf", "interface "+iface, block, func() error {
+			return exec.Command("systemctl", "restart", "dhcpcd").Run()
+		})
+	}
+	return applyStaticIPAddress(iface, cidr)
+}
+
+func configureNMEthernetLAN(iface, cidr string) error {
+	connName := "vpn-connector-lan"
+	_ = exec.Command("nmcli", "con", "delete", connName).Run()
+	cmd := exec.Command("nmcli", "con", "add", "type", "ethernet",
+		"ifname", iface,
+		"con-name", connName,
+		"ipv4.method", "manual",
+		"ipv4.addresses", cidr,
+		"ipv6.method", "ignore",
+		"connection.autoconnect", "yes",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%v: %s", err, string(out))
+	}
+	if out, err := exec.Command("nmcli", "con", "up", connName).CombinedOutput(); err != nil {
+		return fmt.Errorf("%v: %s", err, string(out))
+	}
+	return nil
+}
+
+func applyStaticIPAddress(iface, cidr string) error {
+	exec.Command("ip", "addr", "flush", "dev", iface).Run()
+	exec.Command("ip", "link", "set", iface, "up").Run()
+	if out, err := exec.Command("ip", "addr", "add", cidr, "dev", iface).CombinedOutput(); err != nil {
+		if !strings.Contains(string(out), "File exists") {
+			return fmt.Errorf("%v: %s", err, string(out))
+		}
+	}
+	return nil
 }
 
 func configureHostapd(cfg RouterConfig) error {

@@ -59,7 +59,10 @@
             <button type="submit" class="primary" id="applyBtn">Apply configuration</button>
         </form>
 
-        <div id="progressLog" class="progress-log"></div>
+        <div id="setupLogPanel" class="setup-log-panel" hidden>
+            <h3>Install log</h3>
+            <pre id="setupLog" class="setup-log" aria-live="polite"></pre>
+        </div>
     </div>
     <script src="setup.js"></script>
 </body>
