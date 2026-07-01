@@ -149,7 +149,29 @@ func ensureVPNHostRouteViaWAN(cfg RouterConfig, serverURL string) {
 	_ = exec.Command("ip", args...).Run()
 }
 
+// Re-add the directly-connected subnet routes on WAN/LAN. With DHCP "noprefixroute"
+// on eth0, the kernel does not add these automatically, so if anything flushes them
+// the Pi loses reply routing to its own home LAN (dashboard on WAN IP).
+func ensureConnectedSubnetRoutes(cfg RouterConfig) {
+	if cfg.WANInterface != "" {
+		if wanIP, prefix := getInterfaceIPv4CIDR(cfg.WANInterface); wanIP != "" {
+			if net := networkAddr(wanIP, prefix); net != nil {
+				subnet := fmt.Sprintf("%s/%d", net.String(), prefix)
+				_ = exec.Command("ip", "route", "replace", subnet, "dev", cfg.WANInterface,
+					"proto", "kernel", "scope", "link", "src", wanIP).Run()
+			}
+		}
+	}
+	if cfg.LANInterface != "" {
+		if subnet := lanSubnetCIDR(cfg); subnet != "" && cfg.LANAddress != "" {
+			_ = exec.Command("ip", "route", "replace", subnet, "dev", cfg.LANInterface,
+				"proto", "kernel", "scope", "link", "src", cfg.LANAddress).Run()
+		}
+	}
+}
+
 func MaintainManagementAccess(cfg RouterConfig, serverURL string) {
+	ensureConnectedSubnetRoutes(cfg)
 	ensureWANDefaultOnMain(cfg)
 	ensureWANInputAccess(cfg)
 	ensureLANInputAccess(cfg)
