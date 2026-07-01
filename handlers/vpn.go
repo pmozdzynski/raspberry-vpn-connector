@@ -96,16 +96,26 @@ func GetVPNState() VPNState {
 	}
 
 	st.Connected = running
-	if st.Phase == VPNPhaseConnected && !running {
+	tun := st.TunIface
+	if tun == "" {
+		tun = detectTunInterface()
+	}
+	tunnelUp := tunnelReady(tun)
+
+	if st.Phase == VPNPhaseConnected && (!running || !tunnelUp) {
 		st.Connected = false
 		st.Phase = VPNPhaseDisconnected
 		if st.LastError == "" {
-			st.LastError = "VPN disconnected"
+			st.LastError = disconnectReasonFromLog(fmt.Errorf("tunnel down"))
 		}
-	} else if st.Connected {
+		saveVPNState(st)
+		go func() { _ = ApplyDirectNAT() }()
+		return st
+	}
+	if st.Connected {
 		st.Phase = VPNPhaseConnected
 		if st.TunIface == "" {
-			st.TunIface = detectTunInterface()
+			st.TunIface = tun
 		}
 	} else if st.Phase == "" {
 		st.Phase = VPNPhaseDisconnected
@@ -489,6 +499,9 @@ func handleOpenConnectStopped(sess *vpnConn, reason error) {
 		return
 	}
 	log.Printf("openconnect stopped: %v", reason)
+	if tail := strings.TrimSpace(readLogTail(25)); tail != "" {
+		log.Printf("openconnect log tail:\n%s", tail)
+	}
 	activeVPNSession = nil
 	_ = os.Remove(pidFile)
 
@@ -540,6 +553,14 @@ func openConnectScriptPath() string {
 	return "/bin/true"
 }
 
+func useNoDTLS(profile VPNProfile) bool {
+	if profile.NoDTLS {
+		return true
+	}
+	// FortiGate sends GFtype heartbeats over DTLS that break openconnect on Linux/ARM.
+	return profile.Protocol == "fortinet"
+}
+
 func buildOpenConnectArgs(profile VPNProfile) []string {
 	args := []string{
 		"--protocol=" + profile.Protocol,
@@ -551,7 +572,7 @@ func buildOpenConnectArgs(profile VPNProfile) []string {
 		"--reconnect-timeout=600",
 		"--force-dpd=30",
 	}
-	if profile.NoDTLS {
+	if useNoDTLS(profile) {
 		args = append(args, "--no-dtls")
 	}
 	args = append(args, profile.ServerURL)
@@ -562,9 +583,9 @@ func disconnectReasonFromLog(reason error) string {
 	tail := strings.ToLower(readLogTail(30))
 	switch {
 	case strings.Contains(tail, "cookie is no longer valid"), strings.Contains(tail, "cookie was rejected"):
-		return "VPN session expired on server; reconnect (token may be required). If this repeats, enable No DTLS on the profile"
-	case strings.Contains(tail, "unexpected pre-ppp packet"), strings.Contains(tail, "read error on dtls"):
-		return "VPN DTLS tunnel unstable; enable No DTLS on the profile and reconnect"
+		return "VPN session expired on server; reconnect (FortiToken may be required)"
+	case strings.Contains(tail, "unexpected pre-ppp packet"), strings.Contains(tail, "read error on dtls"), strings.Contains(tail, "failed to connect dtls"):
+		return "VPN DTLS failed (Fortinet heartbeat issue); reconnecting with SSL-only should fix this"
 	case strings.Contains(tail, "detected dead peer"):
 		return "VPN lost contact with server (dead peer); auto-reconnect will retry if password is saved"
 	default:
