@@ -120,23 +120,8 @@ func activeVPNServerURL() string {
 func scheduleManagementMaintenance(serverURL string) {
 	go func() {
 		cfg := GetRouterConfig()
-		delays := []time.Duration{
-			2 * time.Second, 5 * time.Second, 15 * time.Second,
-			30 * time.Second, 60 * time.Second,
-		}
-		for _, delay := range delays {
-			time.Sleep(delay)
-			if !GetVPNState().Connected {
-				return
-			}
-			MaintainManagementAccess(cfg, serverURL)
-		}
-		ticker := time.NewTicker(60 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			if !GetVPNState().Connected {
-				return
-			}
+		time.Sleep(3 * time.Second)
+		if GetVPNState().Connected {
 			MaintainManagementAccess(cfg, serverURL)
 		}
 	}()
@@ -232,13 +217,7 @@ func interfaceUp(iface string) bool {
 }
 
 func tunnelReady(iface string) bool {
-	if iface == "" {
-		return false
-	}
-	if interfaceHasIPv4(iface) {
-		return true
-	}
-	return interfaceUp(iface)
+	return iface != "" && interfaceHasIPv4(iface)
 }
 
 func StartConnect(profileID, password string) error {
@@ -346,18 +325,6 @@ func monitorVPNSession(sess *vpnConn) {
 				return
 			}
 
-			if logIndicatesConnected(readLogTail(40)) {
-				tun = detectTunInterface()
-				if tun == "" {
-					tun = vpnTunInterface
-				}
-				if tunnelReady(tun) || interfaceUp(tun) {
-					ignoreTunInNetworkManager(tun)
-					finishConnected(sess, tun)
-					return
-				}
-			}
-
 			if !processAlive(sess.cmd) {
 				if openConnectChildAlive() {
 					if sess.parentDeadAt.IsZero() {
@@ -411,7 +378,7 @@ func promoteActiveSession() {
 	if tun == "" {
 		tun = vpnTunInterface
 	}
-	if tunnelReady(tun) || logIndicatesConnected(readLogTail(40)) {
+	if tunnelReady(tun) {
 		ignoreTunInNetworkManager(tun)
 		finishConnected(sess, tun)
 	}
@@ -424,17 +391,13 @@ func openConnectChildAlive() bool {
 	return tunnelReady(detectTunInterface())
 }
 
-func logIndicatesConnected(logContent string) bool {
-	lower := strings.ToLower(logContent)
-	return strings.Contains(lower, "configured as") ||
-		strings.Contains(lower, "dtls established") ||
-		strings.Contains(lower, "session authentication will expire")
-}
-
 func finishConnected(sess *vpnConn, tun string) {
 	vpnMu.Lock()
 	defer vpnMu.Unlock()
 	if activeVPNSession != sess {
+		return
+	}
+	if !interfaceHasIPv4(tun) {
 		return
 	}
 
@@ -482,10 +445,7 @@ func watchOpenConnectProcess(sess *vpnConn) {
 	}
 
 	tun := detectTunInterface()
-	if tunnelReady(tun) || logIndicatesConnected(readLogTail(40)) {
-		if tun == "" {
-			tun = vpnTunInterface
-		}
+	if tunnelReady(tun) {
 		if pid := findOpenConnectPID(); pid > 0 {
 			writeOpenConnectPID(pid)
 			ignoreTunInNetworkManager(tun)
