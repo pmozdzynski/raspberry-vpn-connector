@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,6 +51,7 @@ type vpnConn struct {
 	stopCh       chan struct{}
 	passwordSent bool
 	inputSent    bool
+	parentDeadAt time.Time
 }
 
 var (
@@ -74,6 +76,15 @@ func GetVPNState() VPNState {
 
 	running := isOpenConnectRunning()
 	if st.Phase == VPNPhaseConnecting || st.Phase == VPNPhaseNeedInput {
+		if tun := detectTunInterface(); tunnelReady(tun) {
+			st.Phase = VPNPhaseConnected
+			st.Connected = true
+			st.TunIface = tun
+			go promoteActiveSession()
+			if running {
+				return st
+			}
+		}
 		if running {
 			return st
 		}
@@ -239,6 +250,8 @@ func StartConnect(profileID, password string) error {
 		log.Printf("disconnect before connect: %v", err)
 	}
 
+	ensurePolicyRoutingTable()
+
 	_ = os.MkdirAll(runDir, 0755)
 	_ = os.WriteFile(logFile, []byte{}, 0644)
 
@@ -316,17 +329,37 @@ func monitorVPNSession(sess *vpnConn) {
 
 			tun := detectTunInterface()
 			if tunnelReady(tun) {
+				ignoreTunInNetworkManager(tun)
 				finishConnected(sess, tun)
 				return
 			}
 
+			if logIndicatesConnected(readLogTail(40)) {
+				tun = detectTunInterface()
+				if tun == "" {
+					tun = vpnTunInterface
+				}
+				if tunnelReady(tun) || interfaceUp(tun) {
+					ignoreTunInNetworkManager(tun)
+					finishConnected(sess, tun)
+					return
+				}
+			}
+
 			if !processAlive(sess.cmd) {
-				if findOpenConnectPID() > 0 {
+				if openConnectChildAlive() {
+					if sess.parentDeadAt.IsZero() {
+						sess.parentDeadAt = time.Now()
+					}
+					continue
+				}
+				if !sess.parentDeadAt.IsZero() && time.Since(sess.parentDeadAt) < 8*time.Second {
 					continue
 				}
 				failSession(sess, "openconnect exited before tunnel was established")
 				return
 			}
+			sess.parentDeadAt = time.Time{}
 
 			if time.Now().After(deadline) {
 				failSession(sess, "connection timed out waiting for VPN or token")
@@ -353,6 +386,37 @@ func monitorVPNSession(sess *vpnConn) {
 			}
 		}
 	}
+}
+
+func promoteActiveSession() {
+	vpnMu.Lock()
+	sess := activeVPNSession
+	vpnMu.Unlock()
+	if sess == nil {
+		return
+	}
+	tun := detectTunInterface()
+	if tun == "" {
+		tun = vpnTunInterface
+	}
+	if tunnelReady(tun) || logIndicatesConnected(readLogTail(40)) {
+		ignoreTunInNetworkManager(tun)
+		finishConnected(sess, tun)
+	}
+}
+
+func openConnectChildAlive() bool {
+	if findOpenConnectPID() > 0 {
+		return true
+	}
+	return tunnelReady(detectTunInterface())
+}
+
+func logIndicatesConnected(logContent string) bool {
+	lower := strings.ToLower(logContent)
+	return strings.Contains(lower, "configured as") ||
+		strings.Contains(lower, "dtls established") ||
+		strings.Contains(lower, "session authentication will expire")
 }
 
 func finishConnected(sess *vpnConn, tun string) {
@@ -406,9 +470,14 @@ func watchOpenConnectProcess(sess *vpnConn) {
 	}
 
 	tun := detectTunInterface()
-	if tunnelReady(tun) {
+	if tunnelReady(tun) || logIndicatesConnected(readLogTail(40)) {
+		if tun == "" {
+			tun = vpnTunInterface
+		}
 		if pid := findOpenConnectPID(); pid > 0 {
 			writeOpenConnectPID(pid)
+			ignoreTunInNetworkManager(tun)
+			finishConnected(sess, tun)
 			log.Printf("openconnect parent exited (%v); tracking pid %d", waitErr, pid)
 			go watchOpenConnectPID(sess, pid)
 			return
@@ -483,6 +552,22 @@ func handleOpenConnectStopped(sess *vpnConn, reason error) {
 
 const vpnTunInterface = "vpn0"
 
+func openConnectScriptPath() string {
+	candidates := []string{
+		"/opt/vpn-connector/scripts/vpnc-policy.sh",
+		filepath.Join("scripts", "vpnc-policy.sh"),
+	}
+	for _, p := range candidates {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			if abs, err := filepath.Abs(p); err == nil {
+				return abs
+			}
+			return p
+		}
+	}
+	return "/bin/true"
+}
+
 func buildOpenConnectArgs(profile VPNProfile) []string {
 	args := []string{
 		"--protocol=" + profile.Protocol,
@@ -490,6 +575,7 @@ func buildOpenConnectArgs(profile VPNProfile) []string {
 		"--servercert", profile.ServerCertPin,
 		"--passwd-on-stdin",
 		"-i", vpnTunInterface,
+		"--script=" + openConnectScriptPath(),
 		"--reconnect-timeout=600",
 		"--force-dpd=30",
 	}
@@ -651,6 +737,17 @@ func disconnectLocked() error {
 }
 
 func killSessionProcess(sess *vpnConn) error {
+	if openConnectChildAlive() {
+		pid := findOpenConnectPID()
+		if pid > 0 {
+			_ = exec.Command("kill", strconv.Itoa(pid)).Run()
+			time.Sleep(500 * time.Millisecond)
+			if processRunning(pid) {
+				_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
+			}
+		}
+		return nil
+	}
 	if sess == nil || sess.cmd == nil || sess.cmd.Process == nil {
 		return nil
 	}

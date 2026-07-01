@@ -15,7 +15,7 @@ log() {
 
 install_app_files() {
 	log "Installing application to $INSTALL_ROOT"
-	mkdir -p "$INSTALL_ROOT/templates" "$INSTALL_ROOT/configs"
+	mkdir -p "$INSTALL_ROOT/templates" "$INSTALL_ROOT/configs" "$INSTALL_ROOT/scripts"
 
 	if [ -f "$REPO_DIR/vpn-connector" ]; then
 		cp "$REPO_DIR/vpn-connector" "$INSTALL_ROOT/"
@@ -35,6 +35,10 @@ install_app_files() {
 	chmod +x "$INSTALL_ROOT/vpn-connector"
 	cp -r "$REPO_DIR/templates/." "$INSTALL_ROOT/templates/"
 	cp -r "$REPO_DIR/configs/." "$INSTALL_ROOT/configs/"
+	if [ -f "$REPO_DIR/scripts/vpnc-policy.sh" ]; then
+		cp "$REPO_DIR/scripts/vpnc-policy.sh" "$INSTALL_ROOT/scripts/"
+		chmod +x "$INSTALL_ROOT/scripts/vpnc-policy.sh"
+	fi
 }
 
 install_systemd() {
