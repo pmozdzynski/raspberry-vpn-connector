@@ -1,0 +1,14 @@
+[Unit]
+Description=VPN Connector web router
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vpn-connector
+ExecStart=/opt/vpn-connector/vpn-connector
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

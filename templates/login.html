@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - VPN Connector</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="login-container">
+        <h2>VPN Connector</h2>
+        <p class="muted">Please sign in to continue</p>
+        <div id="errorMessage" class="error-message"></div>
+        <form id="loginForm" method="POST" action="/login">
+            <label>Username
+                <input type="text" name="username" autocomplete="username" required autofocus>
+            </label>
+            <label>Password
+                <input type="password" name="password" autocomplete="current-password" required>
+            </label>
+            <button type="submit" class="primary">Sign In</button>
+        </form>
+    </div>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('error') === 'unauthorized') {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = 'Invalid username or password';
+            errorDiv.classList.add('show');
+        }
+    </script>
+</body>
+</html>

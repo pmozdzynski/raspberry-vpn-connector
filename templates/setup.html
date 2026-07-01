@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPN Connector Setup</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container setup-container">
+        <h2>VPN Connector Setup</h2>
+        <p class="muted">Pick two interfaces from those detected below. WAN is internet (WiFi or cable). LAN is your local network (WiFi AP or Ethernet). Any third interface stays unused.</p>
+
+        <div id="networkSummary" class="status-box"></div>
+
+        <form id="setupForm" class="profile-form">
+            <label>WAN interface (internet)
+                <select id="wanInterface" required></select>
+            </label>
+            <p id="wanHint" class="muted small"></p>
+
+            <label>LAN interface (local network)
+                <select id="lanInterface" required></select>
+            </label>
+            <p id="lanHint" class="muted small"></p>
+
+            <label>LAN router IP
+                <input type="text" id="lanAddress" required>
+            </label>
+            <label>LAN prefix
+                <input type="number" id="lanPrefix" value="24" min="8" max="30">
+            </label>
+            <label>DHCP start
+                <input type="text" id="dhcpStart" required>
+            </label>
+            <label>DHCP end
+                <input type="text" id="dhcpEnd" required>
+            </label>
+
+            <div id="wifiApSection">
+                <h4>WiFi access point (LAN is wireless)</h4>
+                <label>WiFi AP SSID
+                    <input type="text" id="apSSID" value="vpn-connector">
+                </label>
+                <label>WiFi AP password
+                    <input type="text" id="apPassword" value="vpn-connector-wifi" minlength="8">
+                </label>
+                <label>WiFi country code
+                    <input type="text" id="wifiCountry" value="PL" maxlength="2">
+                </label>
+            </div>
+
+            <label>Admin username
+                <input type="text" id="adminUser" value="admin">
+            </label>
+            <label>Admin password
+                <input type="password" id="adminPass" required minlength="8">
+            </label>
+            <button type="submit" class="primary" id="applyBtn">Apply configuration</button>
+        </form>
+
+        <div id="progressLog" class="progress-log"></div>
+    </div>
+    <script src="setup.js"></script>
+</body>
+</html>
