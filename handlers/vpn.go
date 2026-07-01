@@ -100,15 +100,15 @@ func GetVPNState() VPNState {
 	if tun == "" {
 		tun = detectTunInterface()
 	}
-	tunnelUp := tunnelReady(tun)
 
-	if st.Phase == VPNPhaseConnected && (!running || !tunnelUp) {
+	if st.Phase == VPNPhaseConnected && !running {
 		st.Connected = false
 		st.Phase = VPNPhaseDisconnected
 		if st.LastError == "" {
 			st.LastError = disconnectReasonFromLog(fmt.Errorf("tunnel down"))
 		}
 		saveVPNState(st)
+		StopManagementWatchdog()
 		go func() { _ = ApplyDirectNAT() }()
 		return st
 	}
@@ -128,13 +128,7 @@ func activeVPNServerURL() string {
 }
 
 func scheduleManagementMaintenance(serverURL string) {
-	go func() {
-		cfg := GetRouterConfig()
-		time.Sleep(3 * time.Second)
-		if GetVPNState().Connected {
-			MaintainManagementAccess(cfg, serverURL)
-		}
-	}()
+	StartManagementWatchdog(serverURL)
 }
 
 func saveVPNState(st VPNState) {
@@ -478,7 +472,70 @@ func watchOpenConnectProcess(sess *vpnConn) {
 	if activeVPNSession != sess {
 		return
 	}
-	handleOpenConnectStopped(sess, waitErr)
+	handleOpenConnectStoppedLocked(sess, waitErr)
+}
+
+func handleOpenConnectStoppedLocked(sess *vpnConn, reason error) {
+	if activeVPNSession != sess {
+		return
+	}
+	log.Printf("openconnect stopped: %v", reason)
+	if tail := strings.TrimSpace(readLogTail(25)); tail != "" {
+		log.Printf("openconnect log tail:\n%s", tail)
+	}
+	activeVPNSession = nil
+	_ = os.Remove(pidFile)
+
+	st := readVPNStateFile()
+	wasConnected := st.Phase == VPNPhaseConnected
+	profile := sess.profile
+	switch st.Phase {
+	case VPNPhaseConnected:
+		saveVPNState(VPNState{
+			Phase:       VPNPhaseDisconnected,
+			ProfileID:   profile.ID,
+			ProfileName: profile.Name,
+			LastError:   disconnectReasonFromLog(reason),
+		})
+	case VPNPhaseConnecting, VPNPhaseNeedInput:
+		msg := "openconnect exited before tunnel was established"
+		if reason != nil {
+			msg = reason.Error()
+		}
+		saveVPNState(VPNState{
+			Phase:     VPNPhaseError,
+			ProfileID: sess.profile.ID,
+			LastError: msg,
+		})
+	default:
+		saveVPNState(VPNState{Phase: VPNPhaseDisconnected})
+	}
+
+	StopManagementWatchdog()
+	go func() {
+		_ = ApplyDirectNAT()
+		if wasConnected && profile.SavePassword && profile.Password != "" {
+			scheduleAutoReconnect(profile.ID)
+		}
+	}()
+}
+
+func readVPNStateFile() VPNState {
+	data, err := os.ReadFile(stateFile)
+	if err != nil {
+		return VPNState{Phase: VPNPhaseDisconnected}
+	}
+	var st VPNState
+	if json.Unmarshal(data, &st) != nil {
+		return VPNState{Phase: VPNPhaseDisconnected}
+	}
+	return st
+}
+
+func handleOpenConnectStopped(sess *vpnConn, reason error) {
+	vpnMu.Lock()
+	defer vpnMu.Unlock()
+	handleOpenConnectStoppedLocked(sess, reason)
 }
 
 func watchOpenConnectPID(sess *vpnConn, pid int) {
@@ -503,48 +560,7 @@ func watchOpenConnectPID(sess *vpnConn, pid int) {
 	if activeVPNSession != sess {
 		return
 	}
-	handleOpenConnectStopped(sess, fmt.Errorf("openconnect pid %d exited", pid))
-}
-
-func handleOpenConnectStopped(sess *vpnConn, reason error) {
-	if activeVPNSession != sess {
-		return
-	}
-	log.Printf("openconnect stopped: %v", reason)
-	if tail := strings.TrimSpace(readLogTail(25)); tail != "" {
-		log.Printf("openconnect log tail:\n%s", tail)
-	}
-	activeVPNSession = nil
-	_ = os.Remove(pidFile)
-
-	st := GetVPNState()
-	wasConnected := st.Phase == VPNPhaseConnected
-	profile := sess.profile
-	switch st.Phase {
-	case VPNPhaseConnected:
-		saveVPNState(VPNState{
-			Phase:     VPNPhaseDisconnected,
-			ProfileID: profile.ID,
-			ProfileName: profile.Name,
-			LastError: disconnectReasonFromLog(reason),
-		})
-	case VPNPhaseConnecting, VPNPhaseNeedInput:
-		msg := "openconnect exited before tunnel was established"
-		if reason != nil {
-			msg = reason.Error()
-		}
-		saveVPNState(VPNState{
-			Phase:     VPNPhaseError,
-			ProfileID: sess.profile.ID,
-			LastError: msg,
-		})
-	default:
-		saveVPNState(VPNState{Phase: VPNPhaseDisconnected})
-	}
-	_ = ApplyDirectNAT()
-	if wasConnected && profile.SavePassword && profile.Password != "" {
-		scheduleAutoReconnect(profile.ID)
-	}
+	handleOpenConnectStoppedLocked(sess, fmt.Errorf("openconnect pid %d exited", pid))
 }
 
 const vpnTunInterface = "vpn0"
@@ -581,6 +597,7 @@ func buildOpenConnectArgs(profile VPNProfile) []string {
 		"--passwd-on-stdin",
 		"-i", vpnTunInterface,
 		"--script=" + openConnectScriptPath(),
+		"--queue-len=8",
 		"--reconnect-timeout=600",
 		"--force-dpd=30",
 	}
@@ -642,8 +659,8 @@ func scheduleAutoReconnect(profileID string) {
 
 func failSession(sess *vpnConn, msg string) {
 	vpnMu.Lock()
-	defer vpnMu.Unlock()
 	if activeVPNSession != sess {
+		vpnMu.Unlock()
 		return
 	}
 	log.Printf("VPN session failed: %s", msg)
@@ -654,6 +671,8 @@ func failSession(sess *vpnConn, msg string) {
 		ProfileID: sess.profile.ID,
 		LastError: msg,
 	})
+	vpnMu.Unlock()
+	StopManagementWatchdog()
 	_ = ApplyDirectNAT()
 }
 
@@ -664,7 +683,7 @@ func SubmitVPNInput(input string) error {
 	if activeVPNSession == nil {
 		return fmt.Errorf("no active VPN connection attempt")
 	}
-	st := GetVPNState()
+	st := readVPNStateFile()
 	if st.Phase != VPNPhaseNeedInput && st.Phase != VPNPhaseConnecting {
 		return fmt.Errorf("VPN is not waiting for input")
 	}
@@ -738,8 +757,9 @@ func disconnectLocked() error {
 		_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
 	}
 	_ = os.Remove(pidFile)
-	_ = ApplyDirectNAT()
 	saveVPNState(VPNState{Phase: VPNPhaseDisconnected})
+	StopManagementWatchdog()
+	go func() { _ = ApplyDirectNAT() }()
 	return nil
 }
 

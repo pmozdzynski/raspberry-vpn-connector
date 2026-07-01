@@ -117,6 +117,10 @@ func ApplyBootstrapWithProgress(cfg RouterConfig, progress setupProgressReporter
 		progress.fail("initial routing", err.Error())
 		return err
 	}
+	if gw := wanGatewayFromRoutes(cfg.WANInterface); gw != "" {
+		cfg.WANGateway = gw
+		_ = SaveRouterConfig(cfg)
+	}
 	progress.ok("initial routing", "direct NAT active")
 
 	if cfg.LANType == "wireless" {

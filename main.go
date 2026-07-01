@@ -90,6 +90,7 @@ func restoreVPNState() {
 	if st.Connected && st.TunIface != "" {
 		log.Printf("VPN tunnel %s detected after reboot; applying VPN NAT", st.TunIface)
 		_ = handlers.ApplyVPNNAT(st.TunIface)
+		handlers.StartManagementWatchdog(st.ServerURL)
 		return
 	}
 	_ = handlers.ApplyDirectNAT()

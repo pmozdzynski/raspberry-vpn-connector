@@ -26,6 +26,7 @@ type RouterConfig struct {
 	APSSID         string `json:"ap_ssid"`
 	APPassword     string `json:"ap_password"`
 	WifiCountry    string `json:"wifi_country"`
+	WANGateway     string `json:"wan_gateway,omitempty"`
 	AdminUsername  string `json:"admin_username"`
 	AdminPassword  string `json:"admin_password"`
 	LastProfileID  string `json:"last_profile_id,omitempty"`
