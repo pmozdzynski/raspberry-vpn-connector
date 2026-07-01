@@ -43,6 +43,8 @@ func ApplyDirectNAT() error {
 	cfg := GetRouterConfig()
 	flushRouterRules()
 	EnsureIPForwarding()
+	ApplyDirectPolicyRouting(cfg)
+	ensureWANInputAccess(cfg)
 
 	wan := cfg.WANInterface
 	if wan == "" {
@@ -67,6 +69,11 @@ func ApplyVPNNAT(tunIface string) error {
 	cfg := GetRouterConfig()
 	flushRouterRules()
 	EnsureIPForwarding()
+	ensureWANInputAccess(cfg)
+
+	if err := ApplyVPNPolicyRouting(cfg, tunIface); err != nil {
+		log.Printf("VPN policy routing: %v", err)
+	}
 
 	appendNAT(tunIface)
 	lan := cfg.LANInterface

@@ -1,6 +1,8 @@
 let editingProfile = null;
 let connectProfileId = null;
 let pollTimer = null;
+let lastVPNPhase = null;
+let statusFailCount = 0;
 
 function showInfo(message, type = "info") {
     const box = document.getElementById("infoBox");
@@ -107,7 +109,12 @@ function schedulePoll(fast) {
 
 function renderWiFiAP(network) {
     const el = document.getElementById("wifiApStatus");
+    const mgmt = document.getElementById("mgmtHint");
     const ap = network?.wifi_ap;
+    const ips = (network?.management_ips || []).map(ip => `http://${ip}:5000/`).join(" · ");
+    mgmt.textContent = ips
+        ? `Management (stays on WAN): ${ips} — also use LAN gateway after VPN is up`
+        : "Use LAN gateway IP for dashboard if WAN URL stops responding during VPN connect";
     if (!ap?.enabled) {
         el.textContent = "";
         return;
@@ -126,6 +133,9 @@ function renderWiFiAP(network) {
 async function refresh() {
     try {
         const data = await fetchStatus();
+        statusFailCount = 0;
+        const prevPhase = lastVPNPhase;
+        lastVPNPhase = data.vpn.phase;
         renderVPN(data.vpn);
         renderWiFiAP(data.network);
         renderProfiles(data.profiles || [], data.vpn);
@@ -134,11 +144,14 @@ async function refresh() {
         const active = data.vpn.phase === "connecting" || data.vpn.phase === "need_input";
         schedulePoll(active);
 
-        if (data.vpn.phase === "connected") {
-            showInfo("VPN connected", "ok");
+        if (data.vpn.phase === "connected" && prevPhase !== "connected") {
+            showInfo("VPN connected via " + (data.vpn.tun_iface || "tunnel"), "ok");
         }
     } catch (err) {
-        showInfo(err.message, "error");
+        statusFailCount += 1;
+        if (statusFailCount >= 3) {
+            showInfo(err.message, "error");
+        }
     }
 }
 

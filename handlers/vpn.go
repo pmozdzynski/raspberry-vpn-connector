@@ -166,6 +166,9 @@ func writeOpenConnectPID(pid int) {
 }
 
 func detectTunInterface() string {
+	if interfaceUp(vpnTunInterface) {
+		return vpnTunInterface
+	}
 	out, err := exec.Command("ip", "-o", "link", "show", "type", "tun").Output()
 	if err != nil {
 		return ""
@@ -177,6 +180,25 @@ func detectTunInterface() string {
 		}
 	}
 	return ""
+}
+
+func interfaceUp(iface string) bool {
+	out, err := exec.Command("ip", "link", "show", iface).Output()
+	if err != nil {
+		return false
+	}
+	s := strings.ToLower(string(out))
+	return strings.Contains(s, "state up") || strings.Contains(s, "state unknown")
+}
+
+func tunnelReady(iface string) bool {
+	if iface == "" {
+		return false
+	}
+	if interfaceHasIPv4(iface) {
+		return true
+	}
+	return interfaceUp(iface)
 }
 
 func StartConnect(profileID, password string) error {
@@ -276,7 +298,7 @@ func monitorVPNSession(sess *vpnConn) {
 			}
 
 			tun := detectTunInterface()
-			if tun != "" && interfaceHasIPv4(tun) {
+			if tunnelReady(tun) {
 				finishConnected(sess, tun)
 				return
 			}
@@ -366,7 +388,7 @@ func watchOpenConnectProcess(sess *vpnConn) {
 	}
 
 	tun := detectTunInterface()
-	if tun != "" && interfaceHasIPv4(tun) {
+	if tunnelReady(tun) {
 		if pid := findOpenConnectPID(); pid > 0 {
 			writeOpenConnectPID(pid)
 			log.Printf("openconnect parent exited (%v); tracking pid %d", waitErr, pid)
@@ -441,12 +463,15 @@ func handleOpenConnectStopped(sess *vpnConn, reason error) {
 	}
 }
 
+const vpnTunInterface = "vpn0"
+
 func buildOpenConnectArgs(profile VPNProfile) []string {
 	args := []string{
 		"--protocol=" + profile.Protocol,
 		"-u", profile.Username,
 		"--servercert", profile.ServerCertPin,
 		"--passwd-on-stdin",
+		"-i", vpnTunInterface,
 		"--reconnect-timeout=600",
 		"--force-dpd=30",
 	}
