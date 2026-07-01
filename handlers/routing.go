@@ -72,7 +72,9 @@ func flushVPNPolicyRouting(cfg RouterConfig) {
 		}
 		wanIP, _ := getInterfaceIPv4CIDR(cfg.WANInterface)
 		if wanIP != "" {
-			_ = exec.Command("ip", "rule", "del", "from", wanIP+"/32", "lookup", "main", "priority", "49").Run()
+			host := wanIP + "/32"
+			_ = exec.Command("ip", "rule", "del", "to", host, "lookup", "main", "priority", "43").Run()
+			_ = exec.Command("ip", "rule", "del", "from", host, "lookup", "main", "priority", "49").Run()
 		}
 	}
 }
@@ -81,27 +83,113 @@ func protectWANManagement(cfg RouterConfig) {
 	if cfg.WANInterface == "" {
 		return
 	}
-	if subnet := wanSubnetCIDR(cfg.WANInterface); subnet != "" {
-		_ = exec.Command("ip", "rule", "add", "from", subnet, "lookup", "main", "priority", "50").Run()
-		_ = exec.Command("ip", "rule", "add", "to", subnet, "lookup", "main", "priority", "51").Run()
-	}
 	wanIP, _ := getInterfaceIPv4CIDR(cfg.WANInterface)
 	if wanIP != "" {
-		_ = exec.Command("ip", "rule", "add", "from", wanIP+"/32", "lookup", "main", "priority", "49").Run()
+		host := wanIP + "/32"
+		ensureIPRule("to", host, "lookup", "main", "priority", "43")
+		ensureIPRule("from", host, "lookup", "main", "priority", "49")
+	}
+	if subnet := wanSubnetCIDR(cfg.WANInterface); subnet != "" {
+		ensureIPRule("from", subnet, "lookup", "main", "priority", "50")
+		ensureIPRule("to", subnet, "lookup", "main", "priority", "51")
 	}
 }
 
 func protectManagementRouting(cfg RouterConfig) {
 	if cfg.LANAddress != "" {
 		host := cfg.LANAddress + "/32"
-		_ = exec.Command("ip", "rule", "add", "to", host, "lookup", "main", "priority", "44").Run()
-		_ = exec.Command("ip", "rule", "add", "from", host, "lookup", "main", "priority", "44").Run()
+		ensureIPRule("to", host, "lookup", "main", "priority", "44")
+		ensureIPRule("from", host, "lookup", "main", "priority", "44")
 	}
 	if subnet := lanSubnetCIDR(cfg); subnet != "" {
-		_ = exec.Command("ip", "rule", "add", "to", subnet, "lookup", "main", "priority", "45").Run()
+		ensureIPRule("to", subnet, "lookup", "main", "priority", "45")
 	}
 	protectWANManagement(cfg)
+	ensureWANDefaultOnMain(cfg)
 	ensureConnectedSubnetRoutes(cfg)
+}
+
+func ensureIPRule(args ...string) {
+	delArgs := append([]string{"rule", "del"}, args...)
+	_ = exec.Command("ip", delArgs...).Run()
+	addArgs := append([]string{"rule", "add"}, args...)
+	_ = exec.Command("ip", addArgs...).Run()
+}
+
+func wanGatewayForInterface(iface string) string {
+	out, err := exec.Command("ip", "route", "show", "dev", iface).Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "default" {
+			continue
+		}
+		for i := 0; i < len(fields)-1; i++ {
+			if fields[i] == "via" {
+				return fields[i+1]
+			}
+		}
+	}
+	out, err = exec.Command("ip", "route", "show", "default").Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "default" {
+			continue
+		}
+		dev := ""
+		for i := 0; i < len(fields)-1; i++ {
+			if fields[i] == "dev" {
+				dev = fields[i+1]
+				break
+			}
+		}
+		if dev != iface {
+			continue
+		}
+		for i := 0; i < len(fields)-1; i++ {
+			if fields[i] == "via" {
+				return fields[i+1]
+			}
+		}
+	}
+	return ""
+}
+
+func ensureWANDefaultOnMain(cfg RouterConfig) {
+	if cfg.WANInterface == "" {
+		return
+	}
+	gw := wanGatewayForInterface(cfg.WANInterface)
+	if gw == "" {
+		return
+	}
+	out, _ := exec.Command("ip", "route", "show", "table", "main").Output()
+	for _, line := range strings.FieldsFunc(string(out), func(r rune) bool { return r == '\n' }) {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "default" {
+			continue
+		}
+		dev := ""
+		for i := 0; i < len(fields)-1; i++ {
+			if fields[i] == "dev" {
+				dev = fields[i+1]
+				break
+			}
+		}
+		if dev == cfg.WANInterface {
+			return
+		}
+		if strings.HasPrefix(dev, "vpn") || strings.HasPrefix(dev, "tun") || strings.HasPrefix(dev, "tap") {
+			_ = exec.Command("ip", "route", "del", "default", "table", "main").Run()
+			break
+		}
+	}
+	_ = exec.Command("ip", "route", "replace", "default", "via", gw, "dev", cfg.WANInterface, "table", "main").Run()
 }
 
 func ensureConnectedSubnetRoutes(cfg RouterConfig) {
@@ -118,6 +206,9 @@ func ensureConnectedSubnetRoutes(cfg RouterConfig) {
 }
 
 func defaultGateway(iface string) string {
+	if gw := wanGatewayForInterface(iface); gw != "" {
+		return gw
+	}
 	out, err := exec.Command("ip", "route", "show", "default").Output()
 	if err != nil {
 		return ""
@@ -193,7 +284,7 @@ func ApplyVPNPolicyRouting(cfg RouterConfig, tunIface string, serverURL string) 
 	}
 
 	// Route LAN client traffic through the VPN table; do not use iif LAN (breaks local dashboard on LAN IP).
-	_ = exec.Command("ip", "rule", "add", "from", lanSubnet, "lookup", table, "priority", "100").Run()
+	ensureIPRule("from", lanSubnet, "lookup", table, "priority", "100")
 
 	loosenReversePathFiltering(lan, tunIface, wan)
 	log.Printf("VPN policy routing: LAN %s uses default via %s (full tunnel for clients)", lanSubnet, tunIface)

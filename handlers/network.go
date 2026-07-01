@@ -195,7 +195,7 @@ func shouldSkipInterface(name string) bool {
 	if strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "veth") || strings.HasPrefix(name, "br-") {
 		return true
 	}
-	if strings.HasPrefix(name, "tun") || strings.HasPrefix(name, "tap") {
+	if strings.HasPrefix(name, "tun") || strings.HasPrefix(name, "tap") || strings.HasPrefix(name, "vpn") {
 		return true
 	}
 	return false

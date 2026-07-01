@@ -120,8 +120,20 @@ func activeVPNServerURL() string {
 func scheduleManagementMaintenance(serverURL string) {
 	go func() {
 		cfg := GetRouterConfig()
-		for _, delay := range []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second} {
+		delays := []time.Duration{
+			2 * time.Second, 5 * time.Second, 15 * time.Second,
+			30 * time.Second, 60 * time.Second,
+		}
+		for _, delay := range delays {
 			time.Sleep(delay)
+			if !GetVPNState().Connected {
+				return
+			}
+			MaintainManagementAccess(cfg, serverURL)
+		}
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
 			if !GetVPNState().Connected {
 				return
 			}
@@ -590,7 +602,9 @@ func disconnectReasonFromLog(reason error) string {
 	tail := strings.ToLower(readLogTail(30))
 	switch {
 	case strings.Contains(tail, "cookie is no longer valid"), strings.Contains(tail, "cookie was rejected"):
-		return "VPN session expired on server; reconnect (token may be required)"
+		return "VPN session expired on server; reconnect (token may be required). If this repeats, enable No DTLS on the profile"
+	case strings.Contains(tail, "unexpected pre-ppp packet"), strings.Contains(tail, "read error on dtls"):
+		return "VPN DTLS tunnel unstable; enable No DTLS on the profile and reconnect"
 	case strings.Contains(tail, "detected dead peer"):
 		return "VPN lost contact with server (dead peer); auto-reconnect will retry if password is saved"
 	default:
