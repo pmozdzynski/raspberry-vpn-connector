@@ -37,6 +37,7 @@ func installSystemPackages() error {
 	required := []string{
 		"dnsmasq",
 		"openconnect",
+		"vpnc-scripts",
 		"iptables",
 		"iproute2",
 	}

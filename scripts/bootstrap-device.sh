@@ -82,12 +82,12 @@ install_base_packages() {
 	apt-get install -y \
 		git curl ca-certificates \
 		golang-go \
-		dnsmasq openconnect iptables iproute2 hostapd \
+		dnsmasq openconnect vpnc-scripts iptables iproute2 hostapd \
 		2>/dev/null \
 		|| apt-get install -y \
 			git curl ca-certificates \
 			golang \
-			dnsmasq openconnect iptables iproute2 hostapd
+			dnsmasq openconnect vpnc-scripts iptables iproute2 hostapd
 }
 
 build_binary() {

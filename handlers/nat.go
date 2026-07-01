@@ -39,6 +39,24 @@ func appendNAT(outIface string) {
 	exec.Command("iptables", "-t", "nat", "-A", natChain, "-o", outIface, "-j", "MASQUERADE").Run()
 }
 
+func ensureForwardAccept() {
+	if exec.Command("iptables", "-C", "FORWARD", "-j", fwdChain).Run() != nil {
+		exec.Command("iptables", "-I", "FORWARD", "1", "-j", fwdChain).Run()
+	}
+}
+
+func ensureMSSClamp(outIface string) {
+	if outIface == "" {
+		return
+	}
+	spec := []string{"-t", "mangle", "-A", "FORWARD", "-o", outIface, "-p", "tcp",
+		"--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu"}
+	check := append([]string{"-C"}, spec...)
+	if exec.Command("iptables", check...).Run() != nil {
+		exec.Command("iptables", spec...).Run()
+	}
+}
+
 func ApplyDirectNAT() error {
 	cfg := GetRouterConfig()
 	flushRouterRules()
@@ -77,9 +95,11 @@ func ApplyVPNNAT(tunIface string) error {
 	lan := cfg.LANInterface
 	if lan != "" {
 		appendForward("-i", lan, "-o", tunIface, "-j", "ACCEPT")
-		appendForward("-i", tunIface, "-o", lan, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
+		appendForward("-i", tunIface, "-o", lan, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT")
+		ensureMSSClamp(tunIface)
 	}
-	log.Printf("VPN NAT via %s", tunIface)
+	ensureForwardAccept()
+	log.Printf("VPN NAT via %s (split-tunnel; corporate routes on main table)", tunIface)
 	return nil
 }
 

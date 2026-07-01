@@ -68,6 +68,10 @@ func flushVPNPolicyRouting(cfg RouterConfig) {
 	_ = exec.Command("ip", "route", "flush", "table", table).Run()
 	if subnet := lanSubnetCIDR(cfg); subnet != "" {
 		_ = exec.Command("ip", "rule", "del", "from", subnet, "table", table).Run()
+		_ = exec.Command("ip", "rule", "del", "from", subnet, "lookup", table, "priority", "100").Run()
+	}
+	if cfg.LANInterface != "" {
+		_ = exec.Command("ip", "rule", "del", "iif", cfg.LANInterface, "table", table).Run()
 	}
 }
 
@@ -298,31 +302,35 @@ func StopManagementWatchdog() {
 }
 
 func ApplyVPNPolicyRouting(cfg RouterConfig, tunIface string, serverURL string) error {
-	ensurePolicyRoutingTable()
 	flushVPNPolicyRouting(cfg)
-
-	table := strconv.Itoa(vpnPolicyTableID)
-	lan := cfg.LANInterface
-	wan := cfg.WANInterface
-	lanSubnet := lanSubnetCIDR(cfg)
-	if lanSubnet == "" || lan == "" || tunIface == "" {
-		return fmt.Errorf("VPN policy routing: missing LAN or tunnel interface")
-	}
-
 	MaintainManagementAccess(cfg, serverURL)
-
-	if wanSubnet := wanSubnetCIDR(wan); wanSubnet != "" {
-		_ = exec.Command("ip", "route", "replace", wanSubnet, "dev", wan, "table", table).Run()
-	}
-	_ = exec.Command("ip", "route", "replace", lanSubnet, "dev", lan, "table", table).Run()
-	if out, err := exec.Command("ip", "route", "replace", "default", "dev", tunIface, "table", table).CombinedOutput(); err != nil {
-		return fmt.Errorf("ip route default dev %s table %s: %v: %s", tunIface, table, err, strings.TrimSpace(string(out)))
-	}
-
-	ensureIPRule("from", lanSubnet, "lookup", table, "priority", "100")
-
-	log.Printf("VPN policy routing: LAN %s -> %s; WAN management pinned on %s", lanSubnet, tunIface, wan)
+	loosenReversePathFiltering(cfg.WANInterface, cfg.LANInterface, tunIface)
+	logTunnelRoutes(tunIface)
+	log.Printf("VPN routing: Fortinet split routes on main (vpnc-script); forward LAN -> %s", tunIface)
 	return nil
+}
+
+func logTunnelRoutes(tunIface string) {
+	if tunIface == "" {
+		return
+	}
+	out, err := exec.Command("ip", "route", "show", "dev", tunIface).CombinedOutput()
+	if err != nil {
+		log.Printf("VPN routes: unable to list routes for %s: %v", tunIface, err)
+		return
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	count := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	if count == 0 {
+		log.Printf("WARNING: no kernel routes via %s — install vpnc-scripts and check openconnect log", tunIface)
+	} else {
+		log.Printf("VPN routes via %s: %d entries on main table", tunIface, count)
+	}
 }
 
 func ApplyDirectPolicyRouting(cfg RouterConfig) {
