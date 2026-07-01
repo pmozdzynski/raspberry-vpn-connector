@@ -356,52 +356,7 @@ func disableHostapd() error {
 }
 
 func configureDnsmasq(cfg RouterConfig) error {
-	if err := ensureDnsmasqInstalled(); err != nil {
-		return err
-	}
-	if err := os.MkdirAll("/etc/dnsmasq.d", 0755); err != nil {
-		return err
-	}
-
-	netmask := prefixToNetmask(cfg.LANPrefix)
-	wanDNS := getWANDNSServers(cfg.WANInterface)
-	upstream := "server=1.1.1.1\nserver=9.9.9.9\n"
-	if len(wanDNS) > 0 {
-		var lines []string
-		for _, s := range wanDNS {
-			lines = append(lines, "server="+s)
-		}
-		upstream = strings.Join(lines, "\n") + "\n"
-	}
-
-	conf := fmt.Sprintf(`# Managed by vpn-connector
-interface=%s
-bind-interfaces
-listen-address=%s
-except-interface=%s
-dhcp-range=%s,%s,%s,%dh
-dhcp-option=option:router,%s
-dhcp-option=option:dns-server,%s
-no-resolv
-%s
-`, cfg.LANInterface, cfg.LANAddress, cfg.WANInterface,
-		cfg.DHCPRangeStart, cfg.DHCPRangeEnd, netmask, cfg.DHCPLeaseHours,
-		cfg.LANAddress, cfg.LANAddress, upstream)
-
-	path := "/etc/dnsmasq.d/vpn-connector.conf"
-	if err := os.WriteFile(path, []byte(conf), 0644); err != nil {
-		return err
-	}
-
-	if out, err := exec.Command("dnsmasq", "--test").CombinedOutput(); err != nil {
-		return fmt.Errorf("dnsmasq config test failed: %v: %s", err, strings.TrimSpace(string(out)))
-	}
-
-	exec.Command("systemctl", "enable", "dnsmasq").Run()
-	if out, err := exec.Command("systemctl", "restart", "dnsmasq").CombinedOutput(); err != nil {
-		return fmt.Errorf("systemctl restart dnsmasq: %v: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return writeDnsmasqConfig(cfg, nil)
 }
 
 func getWANDNSServers(iface string) []string {

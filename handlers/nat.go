@@ -78,6 +78,7 @@ func ApplyDirectNAT() error {
 		appendForward("-i", lan, "-o", wan, "-j", "ACCEPT")
 		appendForward("-i", wan, "-o", lan, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
 	}
+	_ = ApplyDirectDNS()
 	log.Printf("Direct NAT via %s", wan)
 	return nil
 }
@@ -91,15 +92,29 @@ func ApplyVPNNAT(tunIface string) error {
 		log.Printf("VPN policy routing: %v", err)
 	}
 
+	wan := cfg.WANInterface
+	if wan == "" {
+		var err error
+		wan, err = detectDefaultRouteInterface()
+		if err != nil {
+			wan = "eth0"
+		}
+	}
+
 	appendNAT(tunIface)
+	appendNAT(wan)
 	lan := cfg.LANInterface
 	if lan != "" {
 		appendForward("-i", lan, "-o", tunIface, "-j", "ACCEPT")
 		appendForward("-i", tunIface, "-o", lan, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT")
+		appendForward("-i", lan, "-o", wan, "-j", "ACCEPT")
+		appendForward("-i", wan, "-o", lan, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT")
 		ensureMSSClamp(tunIface)
+		ensureMSSClamp(wan)
 	}
 	ensureForwardAccept()
-	log.Printf("VPN NAT via %s (split-tunnel; corporate routes on main table)", tunIface)
+	_ = ApplyVPNDNS()
+	log.Printf("VPN NAT via %s + internet via %s (split-tunnel)", tunIface, wan)
 	return nil
 }
 

@@ -13,6 +13,30 @@ for candidate in \
 	fi
 done
 
+write_vpn_dns_state() {
+	mkdir -p /run/vpn-connector
+	f=/run/vpn-connector/vpn-dns.conf
+	: >"$f"
+	for var in INTERNAL_IP4_DNS INTERNAL_IP4_DNS_2 INTERNAL_IP4_DNS_3 INTERNAL_IP4_DNS_4; do
+		eval val=\$$var
+		if [ -n "$val" ]; then
+			echo "dns=$val" >>"$f"
+		fi
+	done
+	if [ -n "$CISCO_DEF_DOMAIN" ]; then
+		echo "domain=$CISCO_DEF_DOMAIN" >>"$f"
+	fi
+	if [ -n "$CISCO_SPLIT_DNS_INC" ]; then
+		for d in $CISCO_SPLIT_DNS_INC; do
+			echo "domain=$d" >>"$f"
+		done
+	fi
+}
+
+clear_vpn_dns_state() {
+	rm -f /run/vpn-connector/vpn-dns.conf
+}
+
 case "$reason" in
 pre-init)
 	;;
@@ -31,11 +55,13 @@ connect*)
 	if [ -n "$VPNSCRIPT" ]; then
 		"$VPNSCRIPT" "$@"
 	fi
+	write_vpn_dns_state
 	;;
 disconnect*)
 	if [ -n "$VPNSCRIPT" ]; then
 		"$VPNSCRIPT" "$@"
 	fi
+	clear_vpn_dns_state
 	;;
 esac
 exit 0
