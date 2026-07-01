@@ -3,8 +3,8 @@
 # Installs git, runtime packages, clones the repo, installs Go, compiles, then runs install.sh.
 #
 # Usage (on the device, as root):
-#   curl -fsSL https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/main/scripts/bootstrap-device.sh | sh
-#   wget -qO- https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/main/scripts/bootstrap-device.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/master/scripts/bootstrap-device.sh | sh
+#   wget -qO- https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/master/scripts/bootstrap-device.sh | sh
 #
 # Or after cloning:
 #   sudo ./scripts/bootstrap-device.sh
@@ -12,7 +12,7 @@ set -eu
 
 REPO_URL="${REPO_URL:-https://github.com/pmozdzynski/raspberry-vpn-connector.git}"
 REPO_DIR="${REPO_DIR:-/opt/vpn-connector-src}"
-BRANCH="${BRANCH:-main}"
+BRANCH="${BRANCH:-master}"
 
 if [ "$(id -u)" -ne 0 ]; then
 	if command -v sudo >/dev/null 2>&1; then

@@ -25,13 +25,13 @@ The setup wizard lists all detected Ethernet and WiFi interfaces. Pick **two** f
 On a **fresh** Raspberry Pi / Debian system with network and `curl` or `wget`, run as root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/main/scripts/bootstrap-device.sh | sh
+curl -fsSL https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/master/scripts/bootstrap-device.sh | sh
 ```
 
 Or with `wget`:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/main/scripts/bootstrap-device.sh | sh
+wget -qO- https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/master/scripts/bootstrap-device.sh | sh
 ```
 
 This script (`scripts/bootstrap-device.sh`) will:
@@ -56,7 +56,7 @@ Optional environment variables:
 ```bash
 REPO_URL=https://github.com/you/fork.git \
 REPO_DIR=/opt/vpn-connector-src \
-BRANCH=main \
+BRANCH=master \
   sh bootstrap-device.sh
 ```
 
