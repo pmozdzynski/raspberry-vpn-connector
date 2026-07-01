@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 const vpnDNSStateFile = "/run/vpn-connector/vpn-dns.conf"
@@ -17,11 +18,47 @@ type VPNDNSInfo struct {
 }
 
 func readVPNDNSState() VPNDNSInfo {
-	info := parseVPNDNSStateFile()
-	if len(info.Servers) > 0 {
-		return info
+	for attempt := 0; attempt < 6; attempt++ {
+		info := parseVPNDNSStateFile()
+		if len(info.Servers) > 0 {
+			return info
+		}
+		if attempt < 5 {
+			time.Sleep(500 * time.Millisecond)
+		}
 	}
 	return parseVPNDNSFromLog(readLogTail(200))
+}
+
+func appendDNSServers(info *VPNDNSInfo, raw string, seen map[string]bool) {
+	for _, token := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ' ' || r == ',' || r == ';'
+	}) {
+		token = strings.Trim(token, "\"'")
+		ip := net.ParseIP(token)
+		if ip == nil || ip.To4() == nil {
+			continue
+		}
+		addr := ip.String()
+		if seen[addr] {
+			continue
+		}
+		seen[addr] = true
+		info.Servers = append(info.Servers, addr)
+	}
+}
+
+func appendDomains(info *VPNDNSInfo, raw string, seen map[string]bool) {
+	for _, token := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ' ' || r == ',' || r == ';'
+	}) {
+		d := strings.Trim(strings.TrimSuffix(strings.Trim(token, "\"'"), "."), " ")
+		if d == "" || seen[d] {
+			continue
+		}
+		seen[d] = true
+		info.Domains = append(info.Domains, d)
+	}
 }
 
 func parseVPNDNSStateFile() VPNDNSInfo {
@@ -43,16 +80,9 @@ func parseVPNDNSStateFile() VPNDNSInfo {
 		}
 		switch key {
 		case "dns":
-			if net.ParseIP(val) != nil && !seenDNS[val] {
-				seenDNS[val] = true
-				info.Servers = append(info.Servers, val)
-			}
+			appendDNSServers(&info, val, seenDNS)
 		case "domain":
-			d := strings.TrimSuffix(strings.TrimSpace(val), ".")
-			if d != "" && !seenDomain[d] {
-				seenDomain[d] = true
-				info.Domains = append(info.Domains, d)
-			}
+			appendDomains(&info, val, seenDomain)
 		}
 	}
 	return info
@@ -80,12 +110,7 @@ func parseVPNDNSFromLog(logContent string) VPNDNSInfo {
 		if strings.Contains(lower, "domain") && strings.Contains(line, "=") {
 			_, val, ok := strings.Cut(line, "=")
 			if ok {
-				d := strings.Trim(strings.TrimSpace(val), ",;\"'")
-				d = strings.TrimSuffix(d, ".")
-				if d != "" && !strings.Contains(d, " ") && !seenDomain[d] {
-					seenDomain[d] = true
-					info.Domains = append(info.Domains, d)
-				}
+				appendDomains(&info, val, seenDomain)
 			}
 		}
 	}

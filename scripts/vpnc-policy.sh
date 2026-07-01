@@ -20,11 +20,15 @@ write_vpn_dns_state() {
 	for var in INTERNAL_IP4_DNS INTERNAL_IP4_DNS_2 INTERNAL_IP4_DNS_3 INTERNAL_IP4_DNS_4; do
 		eval val=\$$var
 		if [ -n "$val" ]; then
-			echo "dns=$val" >>"$f"
+			for ip in $val; do
+				echo "dns=$ip" >>"$f"
+			done
 		fi
 	done
 	if [ -n "$CISCO_DEF_DOMAIN" ]; then
-		echo "domain=$CISCO_DEF_DOMAIN" >>"$f"
+		for d in $CISCO_DEF_DOMAIN; do
+			echo "domain=$d" >>"$f"
+		done
 	fi
 	if [ -n "$CISCO_SPLIT_DNS_INC" ]; then
 		for d in $CISCO_SPLIT_DNS_INC; do
