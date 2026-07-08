@@ -12,6 +12,8 @@ import (
 
 const vpnDNSStateFile = "/run/vpn-connector/vpn-dns.conf"
 
+var lastDnsmasqConfig string
+
 type VPNDNSInfo struct {
 	Servers []string
 	Domains []string
@@ -19,16 +21,18 @@ type VPNDNSInfo struct {
 
 func readVPNDNSState() VPNDNSInfo {
 	var info VPNDNSInfo
-	for attempt := 0; attempt < 6; attempt++ {
-		info = mergeVPNDNS(info, parseVPNDNSStateFile())
+	for attempt := 0; attempt < 10; attempt++ {
+		info = mergeVPNDNS(
+			mergeVPNDNS(parseVPNDNSStateFile(), parseResolvConfVPNDNS()),
+			parseVPNDNSFromLog(""),
+		)
 		if len(info.Servers) > 0 && len(info.Domains) > 0 {
 			return info
 		}
-		if attempt < 5 {
+		if attempt < 9 {
 			time.Sleep(500 * time.Millisecond)
 		}
 	}
-	info = mergeVPNDNS(info, parseResolvConfVPNDNS())
 	if len(info.Servers) == 0 {
 		info = mergeVPNDNS(info, parseVPNDNSFromLog(readLogTail(200)))
 	}
@@ -270,6 +274,9 @@ dhcp-option=option:dns-server,%s
 		cfg.LANAddress, cfg.LANAddress, dhcpDNS, upstream)
 
 	path := "/etc/dnsmasq.d/vpn-connector.conf"
+	if conf == lastDnsmasqConfig {
+		return nil
+	}
 	if err := os.WriteFile(path, []byte(conf), 0644); err != nil {
 		return err
 	}
@@ -282,7 +289,28 @@ dhcp-option=option:dns-server,%s
 	if out, err := exec.Command("systemctl", "restart", "dnsmasq").CombinedOutput(); err != nil {
 		return fmt.Errorf("systemctl restart dnsmasq: %v: %s", err, strings.TrimSpace(string(out)))
 	}
+	lastDnsmasqConfig = conf
 	return nil
+}
+
+func dnsmasqHasVPNZones() bool {
+	data, err := os.ReadFile("/etc/dnsmasq.d/vpn-connector.conf")
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), "server=/")
+}
+
+func EnsureVPNDNSIfNeeded() {
+	st := GetVPNState()
+	if !st.Connected {
+		return
+	}
+	if dnsmasqHasVPNZones() {
+		return
+	}
+	log.Printf("VPN DNS: corporate zone forwarding missing; re-applying")
+	_ = ApplyVPNDNS()
 }
 
 func ApplyVPNDNS() error {
@@ -307,6 +335,7 @@ func ApplyVPNDNS() error {
 }
 
 func ApplyDirectDNS() error {
+	lastDnsmasqConfig = ""
 	cfg := GetRouterConfig()
 	if err := writeDnsmasqConfig(cfg, nil, ""); err != nil {
 		log.Printf("direct DNS: %v", err)

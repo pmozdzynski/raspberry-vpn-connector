@@ -113,6 +113,7 @@ func EnsureRouterServices() error {
 	st := GetVPNState()
 	if st.Connected {
 		MaintainManagementAccess(cfg, st.ServerURL)
+		EnsureVPNDNSIfNeeded()
 	} else {
 		MaintainManagementAccess(cfg, "")
 	}

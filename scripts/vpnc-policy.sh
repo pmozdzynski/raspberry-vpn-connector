@@ -40,6 +40,17 @@ write_vpn_dns_state() {
 			echo "domain=$d" >>"$f"
 		done
 	fi
+	if [ -r /etc/resolv.conf ]; then
+		grep '^nameserver ' /etc/resolv.conf | while read -r _ ip; do
+			[ -n "$ip" ] && echo "dns=$ip" >>"$f"
+		done
+		grep '^search ' /etc/resolv.conf | while read -r _ rest; do
+			for d in $rest; do
+				case "$d" in lan|local|home|localdomain) continue ;; esac
+				echo "domain=$d" >>"$f"
+			done
+		done
+	fi
 }
 
 clear_vpn_dns_state() {

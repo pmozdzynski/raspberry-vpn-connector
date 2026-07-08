@@ -324,6 +324,7 @@ func MaintainManagementAccess(cfg RouterConfig, serverURL string) {
 	}
 	if st := GetVPNState(); st.Connected && st.TunIface != "" {
 		removeVPNRoutesOverlappingLocal(cfg, st.TunIface)
+		EnsureVPNDNSIfNeeded()
 	}
 	loosenReversePathFiltering(cfg.WANInterface, cfg.LANInterface)
 }
