@@ -119,29 +119,33 @@ func parseVPNDNSFromLog(logContent string) VPNDNSInfo {
 
 func renderDnsmasqUpstream(cfg RouterConfig, vpn *VPNDNSInfo) string {
 	var lines []string
+	vpnServerSet := map[string]bool{}
 	if vpn != nil && len(vpn.Servers) > 0 {
+		for _, server := range vpn.Servers {
+			vpnServerSet[server] = true
+		}
 		for _, domain := range vpn.Domains {
 			for _, server := range vpn.Servers {
 				lines = append(lines, "server=/"+domain+"/"+server)
 			}
 			// Corporate DNS often returns RFC1918; dnsmasq blocks those by default.
 			lines = append(lines, "rebind-domain-ok=/"+domain+"/")
-			lines = append(lines, "local=/"+domain+"/")
-		}
-		for _, server := range vpn.Servers {
-			lines = append(lines, "server="+server)
 		}
 	}
 
 	wanDNS := getWANDNSServers(cfg.WANInterface)
+	addedWAN := false
 	if len(wanDNS) > 0 {
 		for _, server := range wanDNS {
+			if vpnServerSet[server] {
+				continue
+			}
 			lines = append(lines, "server="+server)
+			addedWAN = true
 		}
-	} else if len(lines) == 0 {
+	}
+	if !addedWAN {
 		lines = append(lines, "server=1.1.1.1", "server=9.9.9.9")
-	} else {
-		lines = append(lines, "server=1.1.1.1")
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
