@@ -132,7 +132,7 @@ func ApplyVPNNAT(tunIface string) error {
 		ensureMSSClamp(wan)
 	}
 	ensureForwardAccept()
-	go func() { _ = ApplyVPNDNS() }()
+	_ = ApplyVPNDNS()
 	log.Printf("VPN NAT via %s + internet via %s (split-tunnel)", tunIface, wan)
 	return nil
 }

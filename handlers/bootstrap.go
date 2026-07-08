@@ -356,7 +356,7 @@ func disableHostapd() error {
 }
 
 func configureDnsmasq(cfg RouterConfig) error {
-	return writeDnsmasqConfig(cfg, nil)
+	return writeDnsmasqConfig(cfg, nil, "")
 }
 
 func getWANDNSServers(iface string) []string {

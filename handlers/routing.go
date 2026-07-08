@@ -352,6 +352,7 @@ func StartManagementWatchdog(serverURL string) {
 				return
 			}
 			MaintainManagementAccess(cfg, serverURL)
+			_ = ApplyVPNDNS()
 		}
 
 		ticker := time.NewTicker(30 * time.Second)
