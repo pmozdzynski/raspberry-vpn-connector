@@ -59,20 +59,23 @@ func LoadRouterConfig() RouterConfig {
 
 func SaveRouterConfig(cfg RouterConfig) error {
 	configMu.Lock()
-	defer configMu.Unlock()
-
 	if err := os.MkdirAll(configDir, 0750); err != nil {
+		configMu.Unlock()
 		return err
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
+		configMu.Unlock()
 		return err
 	}
 	if err := os.WriteFile(configFile, data, 0600); err != nil {
+		configMu.Unlock()
 		return err
 	}
 	routerConfig = cfg
-	ReloadAuthCredentials()
+	configMu.Unlock()
+
+	applyAuthCredentials(cfg)
 	return nil
 }
 

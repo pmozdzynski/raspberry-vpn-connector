@@ -63,7 +63,10 @@ func loadOrCreateSessionSecret() []byte {
 }
 
 func loadCredentialsFromConfig() {
-	cfg := GetRouterConfig()
+	applyAuthCredentials(GetRouterConfig())
+}
+
+func applyAuthCredentials(cfg RouterConfig) {
 	credentialsMu.Lock()
 	defer credentialsMu.Unlock()
 	if cfg.AdminUsername != "" {
