@@ -124,6 +124,9 @@ func renderDnsmasqUpstream(cfg RouterConfig, vpn *VPNDNSInfo) string {
 			for _, server := range vpn.Servers {
 				lines = append(lines, "server=/"+domain+"/"+server)
 			}
+			// Corporate DNS often returns RFC1918; dnsmasq blocks those by default.
+			lines = append(lines, "rebind-domain-ok=/"+domain+"/")
+			lines = append(lines, "local=/"+domain+"/")
 		}
 		for _, server := range vpn.Servers {
 			lines = append(lines, "server="+server)
@@ -143,6 +146,20 @@ func renderDnsmasqUpstream(cfg RouterConfig, vpn *VPNDNSInfo) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
+func renderDnsmasqDHCPOptions(vpn *VPNDNSInfo) string {
+	if vpn == nil || len(vpn.Domains) == 0 {
+		return ""
+	}
+	var lines []string
+	lines = append(lines, "dhcp-option=option:domain-name,"+vpn.Domains[0])
+	if len(vpn.Domains) > 1 {
+		lines = append(lines, "dhcp-option=option:domain-search,"+strings.Join(vpn.Domains, ","))
+	} else {
+		lines = append(lines, "dhcp-option=option:domain-search,"+vpn.Domains[0])
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
 func writeDnsmasqConfig(cfg RouterConfig, vpn *VPNDNSInfo) error {
 	if err := ensureDnsmasqInstalled(); err != nil {
 		return err
@@ -153,6 +170,7 @@ func writeDnsmasqConfig(cfg RouterConfig, vpn *VPNDNSInfo) error {
 
 	netmask := prefixToNetmask(cfg.LANPrefix)
 	upstream := renderDnsmasqUpstream(cfg, vpn)
+	dhcpDNS := renderDnsmasqDHCPOptions(vpn)
 
 	conf := fmt.Sprintf(`# Managed by vpn-connector
 interface=%s
@@ -162,11 +180,11 @@ except-interface=%s
 dhcp-range=%s,%s,%s,%dh
 dhcp-option=option:router,%s
 dhcp-option=option:dns-server,%s
-no-resolv
+%sno-resolv
 %s
 `, cfg.LANInterface, cfg.LANAddress, cfg.WANInterface,
 		cfg.DHCPRangeStart, cfg.DHCPRangeEnd, netmask, cfg.DHCPLeaseHours,
-		cfg.LANAddress, cfg.LANAddress, upstream)
+		cfg.LANAddress, cfg.LANAddress, dhcpDNS, upstream)
 
 	path := "/etc/dnsmasq.d/vpn-connector.conf"
 	if err := os.WriteFile(path, []byte(conf), 0644); err != nil {

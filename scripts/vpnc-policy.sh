@@ -30,6 +30,11 @@ write_vpn_dns_state() {
 			echo "domain=$d" >>"$f"
 		done
 	fi
+	if [ -n "$INTERNAL_IP4_DNS_DOMAIN" ]; then
+		for d in $(echo "$INTERNAL_IP4_DNS_DOMAIN" | tr ',' ' '); do
+			echo "domain=$d" >>"$f"
+		done
+	fi
 	if [ -n "$CISCO_SPLIT_DNS_INC" ]; then
 		for d in $CISCO_SPLIT_DNS_INC; do
 			echo "domain=$d" >>"$f"

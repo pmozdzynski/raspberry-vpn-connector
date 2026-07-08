@@ -169,6 +169,8 @@ func ensureManagementFirewall(cfg RouterConfig) {
 		rules = append(rules,
 			[]string{"-i", iface, "-m", "addrtype", "--dst-type", "LOCAL", "-j", "ACCEPT"},
 			[]string{"-i", iface, "-p", "tcp", "--dport", "5000", "-j", "ACCEPT"},
+			[]string{"-i", iface, "-p", "udp", "--dport", "53", "-j", "ACCEPT"},
+			[]string{"-i", iface, "-p", "tcp", "--dport", "53", "-j", "ACCEPT"},
 		)
 	}
 	for _, spec := range rules {
