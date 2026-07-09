@@ -234,6 +234,7 @@ function openConnectModal(id, name) {
     connectProfileId = id;
     document.getElementById("connectProfileName").textContent = name;
     document.getElementById("connectPassword").value = "";
+    document.getElementById("connectToken").value = "";
     document.getElementById("connectModal").classList.remove("hidden");
     document.getElementById("connectPassword").focus();
 }
@@ -243,27 +244,23 @@ function closeConnectModal() {
     document.getElementById("connectModal").classList.add("hidden");
 }
 
-async function startConnect(profileId, password) {
+async function startConnect(profileId, password, token) {
     const res = await fetch("/api/vpn/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile_id: profileId, password: password || "" })
+        body: JSON.stringify({ profile_id: profileId, password: password || "", token: token || "" })
     });
     if (!res.ok) {
         showInfo(await res.text(), "error");
         return;
     }
     closeConnectModal();
-    showInfo("Connecting... enter token/OTP if prompted", "info");
+    showInfo(token ? "Connecting with password and token..." : "Connecting... enter token if prompted", "info");
     refresh();
 }
 
 async function submitToken() {
     const token = document.getElementById("vpnToken").value.trim();
-    if (!token) {
-        showInfo("Enter the token code", "error");
-        return;
-    }
     const res = await fetch("/api/vpn/input", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -343,7 +340,11 @@ document.getElementById("profileForm").addEventListener("submit", async (e) => {
 document.getElementById("clearFormBtn").addEventListener("click", clearForm);
 document.getElementById("connectConfirmBtn").addEventListener("click", () => {
     if (!connectProfileId) return;
-    startConnect(connectProfileId, document.getElementById("connectPassword").value);
+    startConnect(
+        connectProfileId,
+        document.getElementById("connectPassword").value,
+        document.getElementById("connectToken").value.trim()
+    );
 });
 document.getElementById("connectCancelBtn").addEventListener("click", closeConnectModal);
 document.getElementById("submitTokenBtn").addEventListener("click", submitToken);

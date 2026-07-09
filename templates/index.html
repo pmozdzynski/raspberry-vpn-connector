@@ -41,7 +41,10 @@
                 <label>Password
                     <input type="password" id="connectPassword" autocomplete="current-password">
                 </label>
-                <p class="muted small">A one-time code may be requested after the password (FortiToken, OTP, etc.).</p>
+                <label>FortiToken / OTP <span class="muted">(optional)</span>
+                    <input type="text" id="connectToken" inputmode="numeric" autocomplete="one-time-code" placeholder="123456">
+                </label>
+                <p class="muted small">Enter password and token together if you have the code. Leave token empty to enter it later or send a push notification.</p>
                 <div class="button-row">
                     <button id="connectConfirmBtn" class="primary">Connect</button>
                     <button id="connectCancelBtn" class="secondary">Cancel</button>
