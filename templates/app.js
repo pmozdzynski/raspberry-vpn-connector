@@ -27,7 +27,16 @@ function phaseLabel(phase) {
     }
 }
 
-function renderVPN(vpn) {
+function logNeedsToken(logTail) {
+    const lower = (logTail || "").toLowerCase();
+    return lower.includes("fortitoken")
+        || lower.includes("token code")
+        || lower.includes("enter token")
+        || lower.includes("enter otp")
+        || /\ncode:\s*$/i.test(logTail || "");
+}
+
+function renderVPN(vpn, logTail) {
     const state = document.getElementById("vpnState");
     const details = document.getElementById("vpnDetails");
     const disconnectBtn = document.getElementById("disconnectBtn");
@@ -35,23 +44,25 @@ function renderVPN(vpn) {
     const tokenPanel = document.getElementById("tokenPanel");
     const tokenPrompt = document.getElementById("tokenPrompt");
 
-    state.textContent = phaseLabel(vpn.phase);
+    const waitingForToken = vpn.phase === "need_input" || (vpn.phase === "connecting" && logNeedsToken(logTail));
+
+    state.textContent = waitingForToken ? "Token required" : phaseLabel(vpn.phase);
     state.className = vpn.phase === "connected" ? "ok" : (vpn.phase === "error" ? "error-text" : "muted");
 
     if (vpn.phase === "connected") {
         details.textContent = `${vpn.profile_name || vpn.profile_id} via ${vpn.tun_iface || "tun"} since ${vpn.since || "?"}`;
         disconnectBtn.disabled = false;
         tokenPanel.classList.add("hidden");
+    } else if (waitingForToken) {
+        details.textContent = "Enter your one-time token or OTP code.";
+        tokenPrompt.textContent = vpn.input_prompt || "FortiToken code required (check your mobile app or enter OTP).";
+        tokenPanel.classList.remove("hidden");
+        disconnectBtn.disabled = false;
+        document.getElementById("vpnToken").focus();
     } else if (vpn.phase === "connecting") {
         details.textContent = `Connecting to ${vpn.profile_name || vpn.profile_id || "VPN"}...`;
         disconnectBtn.disabled = false;
         tokenPanel.classList.add("hidden");
-    } else if (vpn.phase === "need_input") {
-        details.textContent = "Enter your one-time token or OTP code.";
-        tokenPrompt.textContent = vpn.input_prompt || "VPN server is waiting for a one-time token.";
-        tokenPanel.classList.remove("hidden");
-        disconnectBtn.disabled = false;
-        document.getElementById("vpnToken").focus();
     } else if (vpn.phase === "error") {
         details.textContent = vpn.last_error || "Connection failed";
         disconnectBtn.disabled = true;
@@ -62,7 +73,7 @@ function renderVPN(vpn) {
         tokenPanel.classList.add("hidden");
     }
 
-    reconnectBtn.disabled = vpn.phase === "connecting" || vpn.phase === "need_input";
+    reconnectBtn.disabled = vpn.phase === "connecting" || vpn.phase === "need_input" || waitingForToken;
 }
 
 function renderProfiles(profiles, vpn) {
@@ -198,7 +209,7 @@ async function refresh() {
         statusFailCount = 0;
         const prevPhase = lastVPNPhase;
         lastVPNPhase = data.vpn.phase;
-        renderVPN(data.vpn);
+        renderVPN(data.vpn, data.log_tail);
         renderTailscale(data.tailscale);
         renderWiFiAP(data.network);
         renderProfiles(data.profiles || [], data.vpn);

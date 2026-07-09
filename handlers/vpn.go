@@ -87,6 +87,7 @@ func GetVPNState() VPNState {
 			}
 		}
 		if running {
+			maybePromoteTokenPrompt(&st)
 			return st
 		}
 		if st.Phase != VPNPhaseConnected {
@@ -330,20 +331,22 @@ func monitorVPNSession(sess *vpnConn) {
 				return
 			}
 
-			if !processAlive(sess.cmd) {
-				if openConnectChildAlive() {
-					if sess.parentDeadAt.IsZero() {
-						sess.parentDeadAt = time.Now()
-					}
-					continue
-				}
+			parentAlive := processAlive(sess.cmd)
+			childAlive := openConnectChildAlive()
+			if !parentAlive && !childAlive {
 				if !sess.parentDeadAt.IsZero() && time.Since(sess.parentDeadAt) < 8*time.Second {
 					continue
 				}
 				failSession(sess, "openconnect exited before tunnel was established")
 				return
 			}
-			sess.parentDeadAt = time.Time{}
+			if !parentAlive && childAlive {
+				if sess.parentDeadAt.IsZero() {
+					sess.parentDeadAt = time.Now()
+				}
+			} else {
+				sess.parentDeadAt = time.Time{}
+			}
 
 			if time.Now().After(deadline) {
 				failSession(sess, "connection timed out waiting for VPN or token")
@@ -354,20 +357,7 @@ func monitorVPNSession(sess *vpnConn) {
 				continue
 			}
 
-			if prompt, ok := detectTokenPrompt(readLogTail(80)); ok && !sess.inputSent {
-				vpnMu.Lock()
-				if activeVPNSession == sess {
-					saveVPNState(VPNState{
-						Phase:       VPNPhaseNeedInput,
-						ProfileID:   sess.profile.ID,
-						ProfileName: sess.profile.Name,
-						ServerURL:   sess.profile.ServerURL,
-						InputPrompt: prompt,
-						InputKind:   "token",
-					})
-				}
-				vpnMu.Unlock()
-			}
+			syncTokenPromptState(sess)
 		}
 	}
 }
@@ -803,6 +793,47 @@ func interfaceHasIPv4(iface string) bool {
 	return err == nil && strings.TrimSpace(string(out)) != ""
 }
 
+func syncTokenPromptState(sess *vpnConn) {
+	if sess == nil || sess.inputSent {
+		return
+	}
+	prompt, ok := detectTokenPrompt(readLogTail(120))
+	if !ok {
+		return
+	}
+	vpnMu.Lock()
+	defer vpnMu.Unlock()
+	if activeVPNSession != sess {
+		return
+	}
+	st := readVPNStateFile()
+	if st.Phase == VPNPhaseNeedInput {
+		return
+	}
+	saveVPNState(VPNState{
+		Phase:       VPNPhaseNeedInput,
+		ProfileID:   sess.profile.ID,
+		ProfileName: sess.profile.Name,
+		ServerURL:   sess.profile.ServerURL,
+		InputPrompt: prompt,
+		InputKind:   "token",
+	})
+}
+
+func maybePromoteTokenPrompt(st *VPNState) {
+	if st == nil || st.Phase != VPNPhaseConnecting {
+		return
+	}
+	prompt, ok := detectTokenPrompt(readLogTail(120))
+	if !ok {
+		return
+	}
+	st.Phase = VPNPhaseNeedInput
+	st.InputPrompt = prompt
+	st.InputKind = "token"
+	saveVPNState(*st)
+}
+
 func detectTokenPrompt(logContent string) (string, bool) {
 	if strings.TrimSpace(logContent) == "" {
 		return "", false
@@ -818,7 +849,7 @@ func detectTokenPrompt(logContent string) (string, bool) {
 			"one-time password", "one time password", "fortitoken", "token code",
 			"enter token", "enter otp", "authentication code", "secondary password",
 			"two-factor", "2fa", "passcode", "please enter your response",
-			"please enter", "enter code",
+			"please enter", "enter code", "fortitoken mobile",
 		}
 		for _, kw := range keywords {
 			if strings.Contains(lower, kw) {
@@ -827,6 +858,14 @@ func detectTokenPrompt(logContent string) (string, bool) {
 		}
 		if strings.Contains(lower, "token") && strings.Contains(lower, "enter") {
 			return line, true
+		}
+		if line == "Code:" || strings.HasPrefix(lower, "code:") {
+			for j := i - 1; j >= 0 && j >= i-3; j-- {
+				prev := strings.ToLower(strings.TrimSpace(lines[j]))
+				if strings.Contains(prev, "token") || strings.Contains(prev, "fortitoken") {
+					return strings.TrimSpace(lines[j]), true
+				}
+			}
 		}
 	}
 	return "", false
