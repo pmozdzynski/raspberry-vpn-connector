@@ -187,13 +187,58 @@ func vpnDNSServerLine(domain, server, tunIface string) string {
 }
 
 func getPublicDNSServers(cfg RouterConfig) []string {
-	if servers := getInterfaceDNSServers(cfg.WANInterface); len(servers) > 0 {
+	if servers := filterTailscaleDNS(getInterfaceDNSServers(cfg.WANInterface)); len(servers) > 0 {
 		return servers
 	}
 	if gw := resolvedWANGateway(cfg); gw != "" {
 		return []string{gw}
 	}
 	return []string{"1.1.1.1", "9.9.9.9"}
+}
+
+func filterTailscaleDNS(servers []string) []string {
+	if len(servers) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(servers))
+	for _, s := range servers {
+		if isTailscaleManagedDNS(s) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func isTailscaleManagedDNS(ip string) bool {
+	ip = strings.TrimSpace(ip)
+	return ip == "100.100.100.100" || ip == "fd7a:115c:a1e0::53" || strings.HasPrefix(ip, "fd7a:115c:a1e0:")
+}
+
+func EnsureSystemResolver(cfg RouterConfig) error {
+	servers := getPublicDNSServers(cfg)
+	if len(servers) == 0 {
+		servers = []string{"1.1.1.1", "9.9.9.9"}
+	}
+
+	var b strings.Builder
+	b.WriteString("# Managed by vpn-connector — router uses WAN/public DNS, not Tailscale MagicDNS\n")
+	for _, s := range servers {
+		b.WriteString("nameserver ")
+		b.WriteString(s)
+		b.WriteByte('\n')
+	}
+	content := b.String()
+
+	current, err := os.ReadFile("/etc/resolv.conf")
+	if err == nil && string(current) == content {
+		return nil
+	}
+	if err := os.WriteFile("/etc/resolv.conf", []byte(content), 0644); err != nil {
+		return err
+	}
+	log.Printf("System DNS: %v (Tailscale MagicDNS excluded)", servers)
+	return nil
 }
 
 func getInterfaceDNSServers(iface string) []string {

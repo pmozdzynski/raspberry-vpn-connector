@@ -137,6 +137,8 @@ Requirements:
 3. On remote clients, select this device as the exit node in the Tailscale client.
 4. Configure **split DNS** in the Tailscale admin console: point corporate domains to the Pi's Tailscale IP shown in the dashboard.
 
+The router disables Tailscale MagicDNS on itself (`--accept-dns=false`) so OpenConnect can resolve VPN hostnames via WAN/public DNS. Remote Tailscale clients still use split DNS you configure in the admin console.
+
 Works on Raspberry Pi and any Linux host with OpenConnect installed.
 
 ## Build

@@ -124,6 +124,7 @@ func EnsureRouterServices() error {
 	if exec.Command("systemctl", "is-enabled", "--quiet", "dnsmasq").Run() == nil {
 		_ = exec.Command("systemctl", "restart", "dnsmasq").Run()
 	}
+	EnsureTailscaleRouterDNS()
 	if err := ApplyTailscaleExitNode(); err != nil {
 		log.Printf("Tailscale exit node: %v", err)
 	}

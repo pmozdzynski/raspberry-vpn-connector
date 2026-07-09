@@ -126,6 +126,14 @@ func ApplyTailscaleExitNode() error {
 		return nil
 	}
 
+	// Routers must not use Tailscale MagicDNS for their own resolution (breaks OpenConnect hostname lookup).
+	if out, err := exec.Command("tailscale", "set", "--accept-dns=false").CombinedOutput(); err != nil {
+		log.Printf("Tailscale accept-dns=false: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	if err := EnsureSystemResolver(GetRouterConfig()); err != nil {
+		log.Printf("System DNS restore: %v", err)
+	}
+
 	enabled := TailscaleExitNodeConfigured()
 	args := []string{"set", "--advertise-exit-node=" + boolString(enabled)}
 	if out, err := exec.Command("tailscale", args...).CombinedOutput(); err != nil {
@@ -197,6 +205,16 @@ func tailscaleDnsmasqInterfaces(cfg RouterConfig) []string {
 		return nil
 	}
 	return []string{tailscaleInterface}
+}
+
+func EnsureTailscaleRouterDNS() {
+	if !TailscaleInstalled() || !TailscaleRunning() {
+		return
+	}
+	_ = exec.Command("tailscale", "set", "--accept-dns=false").Run()
+	if err := EnsureSystemResolver(GetRouterConfig()); err != nil {
+		log.Printf("Tailscale router DNS: %v", err)
+	}
 }
 
 func boolString(v bool) string {

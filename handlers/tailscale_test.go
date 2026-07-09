@@ -40,6 +40,14 @@ func TestParseTailscaleStatusJSON(t *testing.T) {
 	}
 }
 
+func TestFilterTailscaleDNS(t *testing.T) {
+	in := []string{"100.100.100.100", "192.168.1.1", "fd7a:115c:a1e0::53", "1.1.1.1"}
+	got := filterTailscaleDNS(in)
+	if len(got) != 2 || got[0] != "192.168.1.1" || got[1] != "1.1.1.1" {
+		t.Fatalf("unexpected filtered DNS: %#v", got)
+	}
+}
+
 func TestRenderDnsmasqUpstreamWithoutVPN(t *testing.T) {
 	cfg := RouterConfig{WANInterface: "eth0"}
 	upstream := renderDnsmasqUpstream(cfg, nil, "")
