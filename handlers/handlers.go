@@ -14,13 +14,15 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"configured":         IsConfigured(),
-		"network":            GetNetworkSnapshot(),
-		"vpn":                GetVPNState(),
-		"waiting_for_token":  VPNWaitingForToken(),
-		"tailscale":          GetTailscaleStatus(),
-		"profiles":           public,
-		"log_tail":           OpenConnectLogTail(),
+		"configured":          IsConfigured(),
+		"network":             GetNetworkSnapshot(),
+		"vpn":                 GetVPNState(),
+		"waiting_for_token":   AwaitingTokenInput(),
+		"awaiting_token":      AwaitingTokenInput(),
+		"openconnect_running": isOpenConnectRunning(),
+		"tailscale":           GetTailscaleStatus(),
+		"profiles":            public,
+		"log_tail":            OpenConnectLogTail(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

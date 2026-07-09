@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VPN Connector</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
     <div id="infoBox" class="info-box"></div>
@@ -96,13 +96,14 @@
 
         <div id="logTerminal" class="log-terminal" tabindex="0">
             <pre id="logOutput" class="log-output"></pre>
-            <div id="logInputRow" class="log-input-row hidden">
+            <div id="logInputRow" class="log-input-row">
                 <span class="log-prompt">Code:</span>
-                <input type="text" id="logTerminalInput" inputmode="numeric" autocomplete="one-time-code" spellcheck="false" aria-label="FortiToken code">
+                <input type="text" id="logTerminalInput" inputmode="numeric" autocomplete="one-time-code" spellcheck="false" aria-label="FortiToken code" disabled placeholder="Connect VPN — type here when Code: is prompted">
+                <button type="button" id="logSubmitBtn" class="log-submit" disabled title="Submit token">↵</button>
             </div>
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=3"></script>
 </body>
 </html>

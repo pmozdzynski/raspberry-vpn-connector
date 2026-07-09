@@ -925,19 +925,20 @@ func applyTokenPromptFromLog(st VPNState, running bool) VPNState {
 	return st
 }
 
-func VPNWaitingForToken() bool {
+func AwaitingTokenInput() bool {
 	if !isOpenConnectRunning() {
 		return false
 	}
-	st := GetVPNState()
+	st := readVPNStateFile()
 	if st.Phase == VPNPhaseNeedInput {
 		return true
 	}
-	if st.Phase != VPNPhaseConnecting {
-		return false
-	}
 	_, ok := detectTokenPrompt(readLogTail(120))
 	return ok
+}
+
+func VPNWaitingForToken() bool {
+	return AwaitingTokenInput()
 }
 
 func detectTokenPrompt(logContent string) (string, bool) {

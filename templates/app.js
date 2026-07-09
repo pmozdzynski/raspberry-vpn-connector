@@ -50,46 +50,63 @@ function logDisplayText(logTail, waitingForToken) {
 
 function renderInteractiveTerminal(logTail, waitingForToken) {
     const output = document.getElementById("logOutput");
-    const inputRow = document.getElementById("logInputRow");
     const input = document.getElementById("logTerminalInput");
+    const submitBtn = document.getElementById("logSubmitBtn");
     const terminal = document.getElementById("logTerminal");
+    if (!output || !input || !submitBtn || !terminal) {
+        return;
+    }
 
     output.textContent = logDisplayText(logTail, waitingForToken);
 
+    const userTyping = document.activeElement === input;
+
     if (waitingForToken) {
-        inputRow.classList.remove("hidden");
+        input.disabled = false;
+        submitBtn.disabled = false;
+        input.placeholder = "Type token, Enter to submit (empty = push)";
         terminal.classList.add("log-terminal-active");
-        if (document.activeElement !== input && !tokenSubmitting) {
+        if (!userTyping && !tokenSubmitting) {
             input.focus();
         }
     } else {
-        inputRow.classList.add("hidden");
+        submitBtn.disabled = true;
         terminal.classList.remove("log-terminal-active");
-        if (!tokenSubmitting) {
-            input.value = "";
+        if (!userTyping) {
+            input.disabled = true;
+            input.placeholder = "Connect VPN — type here when Code: is prompted";
+            if (!tokenSubmitting) {
+                input.value = "";
+            }
         }
     }
 
     output.scrollTop = output.scrollHeight;
 }
 
-function vpnWaitingForToken(vpn, logTail, waitingFlag) {
-    if (vpn.phase === "connected" || vpn.phase === "disconnected" || vpn.phase === "error") {
+function vpnWaitingForToken(vpn, logTail, status) {
+    if (vpn.phase === "connected") {
         return false;
     }
-    if (vpn.phase === "need_input" || waitingFlag) {
+    if (status.awaiting_token || status.waiting_for_token) {
+        return true;
+    }
+    if (status.openconnect_running && logNeedsToken(logTail)) {
+        return true;
+    }
+    if (vpn.phase === "need_input") {
         return true;
     }
     return vpn.phase === "connecting" && logNeedsToken(logTail);
 }
 
-function renderVPN(vpn, logTail, waitingFlag) {
+function renderVPN(vpn, logTail, status) {
     const state = document.getElementById("vpnState");
     const details = document.getElementById("vpnDetails");
     const disconnectBtn = document.getElementById("disconnectBtn");
     const reconnectBtn = document.getElementById("reconnectBtn");
 
-    const waitingForToken = vpnWaitingForToken(vpn, logTail, waitingFlag);
+    const waitingForToken = vpnWaitingForToken(vpn, logTail, status);
 
     state.textContent = waitingForToken ? "Token required" : phaseLabel(vpn.phase);
     state.className = vpn.phase === "connected" ? "ok" : (vpn.phase === "error" && !waitingForToken ? "error-text" : "muted");
@@ -114,14 +131,14 @@ function renderVPN(vpn, logTail, waitingFlag) {
     reconnectBtn.disabled = vpn.phase === "connecting" || waitingForToken;
 }
 
-function renderProfiles(profiles, vpn, waitingFlag, logTail) {
+function renderProfiles(profiles, vpn, status, logTail) {
     const list = document.getElementById("profilesList");
     if (!profiles.length) {
         list.innerHTML = "<p class='muted'>No profiles yet. Add one below.</p>";
         return;
     }
 
-    const busy = vpn.phase === "connecting" || vpnWaitingForToken(vpn, logTail, waitingFlag);
+    const busy = vpn.phase === "connecting" || vpnWaitingForToken(vpn, logTail, status);
 
     list.innerHTML = profiles.map(p => {
         const active = vpn.connected && vpn.profile_id === p.id;
@@ -248,15 +265,21 @@ async function refresh() {
         const prevPhase = lastVPNPhase;
         lastVPNPhase = data.vpn.phase;
         const logTail = data.log_tail || "";
-        const waiting = !!data.waiting_for_token;
-        renderVPN(data.vpn, logTail, waiting);
+        const status = {
+            awaiting_token: !!data.awaiting_token,
+            waiting_for_token: !!data.waiting_for_token,
+            openconnect_running: !!data.openconnect_running,
+        };
+        renderVPN(data.vpn, logTail, status);
         renderTailscale(data.tailscale);
         renderWiFiAP(data.network);
-        renderProfiles(data.profiles || [], data.vpn, waiting, logTail);
-        const waitingForToken = vpnWaitingForToken(data.vpn, logTail, waiting);
+        renderProfiles(data.profiles || [], data.vpn, status, logTail);
+        const waitingForToken = vpnWaitingForToken(data.vpn, logTail, status);
         renderInteractiveTerminal(logTail, waitingForToken);
 
-        const active = data.vpn.phase === "connecting" || data.vpn.phase === "need_input";
+        const active = data.vpn.phase === "connecting"
+            || data.vpn.phase === "need_input"
+            || waitingForToken;
         schedulePoll(active);
 
         if (data.vpn.phase === "connected" && prevPhase !== "connected") {
@@ -300,6 +323,9 @@ async function startConnect(profileId, password) {
 
 async function submitToken() {
     const input = document.getElementById("logTerminalInput");
+    if (!input || input.disabled) {
+        return;
+    }
     const token = input.value.trim();
     tokenSubmitting = true;
     const res = await fetch("/api/vpn/input", {
@@ -390,16 +416,23 @@ document.getElementById("connectConfirmBtn").addEventListener("click", () => {
 document.getElementById("connectCancelBtn").addEventListener("click", closeConnectModal);
 
 document.getElementById("logTerminalInput").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !e.target.disabled) {
         e.preventDefault();
         submitToken();
     }
 });
 
-document.getElementById("logTerminal").addEventListener("click", () => {
-    const inputRow = document.getElementById("logInputRow");
-    if (!inputRow.classList.contains("hidden")) {
-        document.getElementById("logTerminalInput").focus();
+document.getElementById("logSubmitBtn").addEventListener("click", () => {
+    const input = document.getElementById("logTerminalInput");
+    if (!input.disabled) {
+        submitToken();
+    }
+});
+
+document.getElementById("logTerminal").addEventListener("click", (e) => {
+    const input = document.getElementById("logTerminalInput");
+    if (!input.disabled && e.target !== document.getElementById("logSubmitBtn")) {
+        input.focus();
     }
 });
 
