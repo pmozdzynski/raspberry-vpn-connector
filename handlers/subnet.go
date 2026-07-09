@@ -141,7 +141,7 @@ func FormatManagementURLs(cfg RouterConfig) []string {
 			return
 		}
 		seen[ip] = true
-		urls = append(urls, fmt.Sprintf("http://%s:5000/", ip))
+		urls = append(urls, fmt.Sprintf("https://%s:5000/", ip))
 	}
 
 	if cfg.WANInterface != "" {
@@ -158,7 +158,7 @@ func FormatManagementURLs(cfg RouterConfig) []string {
 func FormatManagementHint(cfg RouterConfig) string {
 	urls := FormatManagementURLs(cfg)
 	if len(urls) == 0 {
-		return "Open http://<device-ip>:5000/ on any interface with an IPv4 address"
+		return "Open https://<device-ip>:5000/ on any interface with an IPv4 address"
 	}
 	return "Dashboard: " + strings.Join(urls, " or ")
 }

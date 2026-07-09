@@ -56,10 +56,10 @@ print_access_help() {
 	echo "Open the setup wizard in a browser:"
 	if [ -n "$ips" ]; then
 		echo "$ips" | while read -r ip; do
-			[ -n "$ip" ] && echo "  http://${ip}:5000/setup"
+			[ -n "$ip" ] && echo "  https://${ip}:5000/setup"
 		done
 	else
-		echo "  http://<device-ip>:5000/setup"
+		echo "  https://<device-ip>:5000/setup"
 	fi
 	echo
 	echo "Connect WAN WiFi before setup if it is not already online."

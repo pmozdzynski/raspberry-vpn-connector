@@ -163,6 +163,7 @@ func ensureManagementFirewall(cfg RouterConfig) {
 	rules := [][]string{
 		{"-i", "lo", "-j", "ACCEPT"},
 		{"-p", "tcp", "--dport", "5000", "-j", "ACCEPT"},
+		{"-p", "tcp", "--dport", "80", "-j", "ACCEPT"},
 		{"-p", "tcp", "--sport", "5000", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"},
 	}
 	for _, iface := range []string{cfg.WANInterface, cfg.LANInterface, tailscaleInterface} {
@@ -175,6 +176,7 @@ func ensureManagementFirewall(cfg RouterConfig) {
 		rules = append(rules,
 			[]string{"-i", iface, "-m", "addrtype", "--dst-type", "LOCAL", "-j", "ACCEPT"},
 			[]string{"-i", iface, "-p", "tcp", "--dport", "5000", "-j", "ACCEPT"},
+			[]string{"-i", iface, "-p", "tcp", "--dport", "80", "-j", "ACCEPT"},
 			[]string{"-i", iface, "-p", "udp", "--dport", "53", "-j", "ACCEPT"},
 			[]string{"-i", iface, "-p", "tcp", "--dport", "53", "-j", "ACCEPT"},
 		)

@@ -27,41 +27,58 @@ function phaseLabel(phase) {
     }
 }
 
+let tokenModalOpen = false;
+
+function logNeedsToken(logTail) {
+    const lower = (logTail || "").toLowerCase();
+    return lower.includes("fortitoken")
+        || lower.includes("token code")
+        || lower.includes("enter token")
+        || lower.includes("enter otp")
+        || lower.includes("one-time password")
+        || /(^|\n)\s*code:\s*$/i.test(logTail || "");
+}
+
 function openTokenModal(prompt) {
     document.getElementById("tokenModalPrompt").textContent =
         prompt || "VPN server is waiting for a one-time token.";
     const modal = document.getElementById("tokenModal");
-    if (modal.classList.contains("hidden")) {
+    if (!tokenModalOpen) {
         modal.classList.remove("hidden");
+        tokenModalOpen = true;
         document.getElementById("vpnToken").focus();
     }
 }
 
 function closeTokenModal() {
     document.getElementById("tokenModal").classList.add("hidden");
+    tokenModalOpen = false;
 }
 
-function renderVPN(vpn) {
+function renderVPN(vpn, logTail) {
     const state = document.getElementById("vpnState");
     const details = document.getElementById("vpnDetails");
     const disconnectBtn = document.getElementById("disconnectBtn");
     const reconnectBtn = document.getElementById("reconnectBtn");
 
-    state.textContent = phaseLabel(vpn.phase);
+    const waitingForToken = vpn.phase === "need_input"
+        || (vpn.phase === "connecting" && logNeedsToken(logTail));
+
+    state.textContent = waitingForToken ? "Token required" : phaseLabel(vpn.phase);
     state.className = vpn.phase === "connected" ? "ok" : (vpn.phase === "error" ? "error-text" : "muted");
 
     if (vpn.phase === "connected") {
         details.textContent = `${vpn.profile_name || vpn.profile_id} via ${vpn.tun_iface || "tun"} since ${vpn.since || "?"}`;
         disconnectBtn.disabled = false;
         closeTokenModal();
+    } else if (waitingForToken) {
+        details.textContent = "Enter your one-time token or OTP code in the popup.";
+        disconnectBtn.disabled = false;
+        openTokenModal(vpn.input_prompt);
     } else if (vpn.phase === "connecting") {
         details.textContent = `Connecting to ${vpn.profile_name || vpn.profile_id || "VPN"}...`;
         disconnectBtn.disabled = false;
         closeTokenModal();
-    } else if (vpn.phase === "need_input") {
-        details.textContent = "Enter your one-time token or OTP code in the popup.";
-        disconnectBtn.disabled = false;
-        openTokenModal(vpn.input_prompt);
     } else if (vpn.phase === "error") {
         details.textContent = vpn.last_error || "Connection failed";
         disconnectBtn.disabled = true;
@@ -72,7 +89,7 @@ function renderVPN(vpn) {
         closeTokenModal();
     }
 
-    reconnectBtn.disabled = vpn.phase === "connecting" || vpn.phase === "need_input";
+    reconnectBtn.disabled = vpn.phase === "connecting" || vpn.phase === "need_input" || waitingForToken;
 }
 
 function renderProfiles(profiles, vpn) {
@@ -183,7 +200,7 @@ function renderWiFiAP(network) {
     const el = document.getElementById("wifiApStatus");
     const mgmt = document.getElementById("mgmtHint");
     const ap = network?.wifi_ap;
-    const ips = (network?.management_ips || []).map(ip => `http://${ip}:5000/`).join(" · ");
+    const ips = (network?.management_ips || []).map(ip => `https://${ip}:5000/`).join(" · ");
     mgmt.textContent = ips
         ? `Management (stays on WAN): ${ips} — also use LAN gateway after VPN is up`
         : "Use LAN gateway IP for dashboard if WAN URL stops responding during VPN connect";
@@ -208,13 +225,13 @@ async function refresh() {
         statusFailCount = 0;
         const prevPhase = lastVPNPhase;
         lastVPNPhase = data.vpn.phase;
-        renderVPN(data.vpn);
+        renderVPN(data.vpn, data.log_tail);
         renderTailscale(data.tailscale);
         renderWiFiAP(data.network);
         renderProfiles(data.profiles || [], data.vpn);
         document.getElementById("logTail").textContent = data.log_tail || "";
 
-        const active = data.vpn.phase === "connecting" || data.vpn.phase === "need_input";
+        const active = data.vpn.phase === "connecting" || data.vpn.phase === "need_input" || logNeedsToken(data.log_tail);
         schedulePoll(active);
 
         if (data.vpn.phase === "connected" && prevPhase !== "connected") {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -58,17 +59,7 @@ func main() {
 	http.HandleFunc("/api/vpn/reconnect", handlers.RequireAuth(handlers.VPNReconnectHandler))
 	http.HandleFunc("/api/tailscale/exit-node", handlers.RequireAuth(handlers.TailscaleExitNodeHandler))
 
-	go func() {
-		log.Println("Starting server on :5000")
-		if handlers.IsConfigured() {
-			log.Println("Dashboard at http://<device-ip>:5000/")
-		} else {
-			log.Println("First boot. Open http://<device-ip>:5000/setup")
-		}
-		if err := http.ListenAndServe(":5000", nil); err != nil {
-			log.Fatalf("Server failed: %v", err)
-		}
-	}()
+	go serveDashboard()
 
 	time.Sleep(2 * time.Second)
 
@@ -84,6 +75,43 @@ func main() {
 	}
 
 	select {}
+}
+
+func serveDashboard() {
+	certPath, keyPath, err := handlers.EnsureTLSCert()
+	if err != nil {
+		log.Printf("TLS setup failed (%v); falling back to HTTP on :5000", err)
+		log.Println("Dashboard at http://<device-ip>:5000/")
+		if err := http.ListenAndServe(":5000", nil); err != nil {
+			log.Fatalf("Server failed: %v", err)
+		}
+		return
+	}
+
+	if handlers.IsConfigured() {
+		log.Println("Dashboard at https://<device-ip>:5000/ (self-signed cert; accept the browser warning)")
+	} else {
+		log.Println("First boot. Open https://<device-ip>:5000/setup (self-signed cert; accept the browser warning)")
+	}
+
+	// Redirect plain HTTP on :80 to HTTPS so bookmarks and typos still work.
+	go func() {
+		redirect := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			host := r.Host
+			if h, _, splitErr := net.SplitHostPort(host); splitErr == nil {
+				host = h
+			}
+			http.Redirect(w, r, "https://"+host+":5000"+r.RequestURI, http.StatusMovedPermanently)
+		})
+		if err := http.ListenAndServe(":80", redirect); err != nil {
+			log.Printf("HTTP redirect listener not started: %v", err)
+		}
+	}()
+
+	log.Println("Starting HTTPS server on :5000")
+	if err := http.ListenAndServeTLS(":5000", certPath, keyPath, nil); err != nil {
+		log.Fatalf("Server failed: %v", err)
+	}
 }
 
 func restoreVPNState() {

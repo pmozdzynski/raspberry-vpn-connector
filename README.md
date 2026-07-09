@@ -50,10 +50,10 @@ This script (`scripts/bootstrap-device.sh`) will:
 At the end it prints URLs like:
 
 ```
-http://192.168.x.x:5000/setup
+https://192.168.x.x:5000/setup
 ```
 
-Open that in a browser to finish configuration (WAN/LAN, DHCP, admin password).
+Open that in a browser to finish configuration (WAN/LAN, DHCP, admin password). The dashboard uses HTTPS with a self-signed certificate generated on first run, so accept the browser security warning. Plain HTTP on port 80 redirects to HTTPS.
 
 > **Note:** The device IP comes from your home router/ISP DHCP and may be unknown beforehand. The script lists every IPv4 address it finds. If none appear yet, connect Ethernet, wait a moment, then run `ip -4 addr show`.
 
@@ -92,7 +92,7 @@ sudo ./scripts/install.sh
 ```
 
 1. Ensure WAN has internet (WiFi associated or cable plugged in).
-2. Open `http://<device-ip>:5000/setup` and complete the wizard.
+2. Open `https://<device-ip>:5000/setup` and complete the wizard (accept the self-signed cert warning).
 3. Log in at `/login`, add VPN profiles, connect.
 
 ## VPN profile example
@@ -125,7 +125,7 @@ Remote Tailscale clients can use this device as an exit node with **split-tunnel
 Enable in the dashboard under **Tailscale Exit Node**, or via API:
 
 ```bash
-curl -u admin:password -X POST http://<device-ip>:5000/api/tailscale/exit-node \
+curl -ku admin:password -X POST https://<device-ip>:5000/api/tailscale/exit-node \
   -H 'Content-Type: application/json' \
   -d '{"enabled": true}'
 ```
