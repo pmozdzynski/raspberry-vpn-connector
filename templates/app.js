@@ -52,10 +52,13 @@ function hideTokenPanel() {
 }
 
 function vpnWaitingForToken(vpn, logTail, waitingFlag) {
-    if (vpn.phase === "connected") return false;
-    return waitingFlag
-        || vpn.phase === "need_input"
-        || logNeedsToken(logTail);
+    if (vpn.phase === "connected" || vpn.phase === "disconnected" || vpn.phase === "error") {
+        return false;
+    }
+    if (vpn.phase === "need_input" || waitingFlag) {
+        return true;
+    }
+    return vpn.phase === "connecting" && logNeedsToken(logTail);
 }
 
 function renderVPN(vpn, logTail, waitingFlag) {
@@ -235,10 +238,7 @@ async function refresh() {
         renderProfiles(data.profiles || [], data.vpn, waiting, logTail);
         document.getElementById("logTail").textContent = logTail;
 
-        const active = data.vpn.phase === "connecting"
-            || data.vpn.phase === "need_input"
-            || waiting
-            || logNeedsToken(logTail);
+        const active = data.vpn.phase === "connecting" || data.vpn.phase === "need_input";
         schedulePoll(active);
 
         if (data.vpn.phase === "connected" && prevPhase !== "connected") {

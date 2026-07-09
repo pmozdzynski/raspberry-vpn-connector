@@ -90,18 +90,12 @@ func GetVPNState() VPNState {
 			maybePromoteTokenPrompt(&st)
 			return st
 		}
-		// OpenConnect may still be waiting for FortiToken on stdin even when pgrep
-		// briefly misses the process or the tracked session was lost.
-		if prompt, ok := detectTokenPrompt(readLogTail(120)); ok {
-			st.Phase = VPNPhaseNeedInput
-			st.InputPrompt = prompt
-			st.InputKind = "token"
-			return st
-		}
-		if st.Phase != VPNPhaseConnected {
-			st.Phase = VPNPhaseDisconnected
-			st.Connected = false
-		}
+		// Stale connecting/need_input state — openconnect is no longer running.
+		st.Phase = VPNPhaseDisconnected
+		st.Connected = false
+		st.InputPrompt = ""
+		st.InputKind = ""
+		saveVPNState(st)
 		return st
 	}
 
@@ -831,6 +825,7 @@ func disconnectLocked() error {
 		_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
 	}
 	_ = os.Remove(pidFile)
+	_ = os.WriteFile(logFile, []byte{}, 0644)
 	saveVPNState(VPNState{Phase: VPNPhaseDisconnected})
 	StopManagementWatchdog()
 	go func() { _ = ApplyDirectNAT() }()
@@ -931,15 +926,18 @@ func applyTokenPromptFromLog(st VPNState, running bool) VPNState {
 }
 
 func VPNWaitingForToken() bool {
+	if !isOpenConnectRunning() {
+		return false
+	}
 	st := GetVPNState()
 	if st.Phase == VPNPhaseNeedInput {
 		return true
 	}
-	if st.Phase == VPNPhaseConnected {
+	if st.Phase != VPNPhaseConnecting {
 		return false
 	}
 	_, ok := detectTokenPrompt(readLogTail(120))
-	return ok && isOpenConnectRunning()
+	return ok
 }
 
 func detectTokenPrompt(logContent string) (string, bool) {
