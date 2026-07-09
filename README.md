@@ -106,14 +106,13 @@ openconnect --protocol=fortinet \
   https://secure.foo.bar:20443
 ```
 
-Enable **Save password** to reuse the password on reconnect. **FortiToken / OTP** is entered in the dashboard or on the device console when Fortinet asks for it (not stored).
+Enable **Save password** to reuse the password on reconnect. **FortiToken / OTP** is typed in the interactive connection log when Fortinet asks for it (not stored).
 
 ## FortiToken / 2FA flow
 
 1. Click **Connect** and enter your VPN password.
-2. When Fortinet asks, a **centered popup** appears over the dashboard — enter the code and submit.
-3. Leave token empty and submit to send a push notification to FortiToken Mobile.
-4. Connection completes and LAN traffic is NATed through the VPN tunnel (corporate routes via VPN, general internet via WAN).
+2. When Fortinet asks, type your code **directly in the black connection log** after `Code:` and press Enter (empty + Enter sends a FortiToken Mobile push).
+3. Connection completes and LAN traffic is NATed through the VPN tunnel (corporate routes via VPN, general internet via WAN).
 
 ## Tailscale filtered exit node
 

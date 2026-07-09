@@ -38,22 +38,39 @@ function logNeedsToken(logTail) {
         || /(^|\n)\s*code:\s*$/im.test(text);
 }
 
-let tokenModalOpen = false;
+let tokenSubmitting = false;
 
-function openTokenModal(prompt) {
-    closeConnectModal();
-    document.getElementById("tokenModalPrompt").textContent =
-        prompt || "VPN server is waiting for a one-time token.";
-    document.getElementById("tokenModal").classList.remove("hidden");
-    if (!tokenModalOpen) {
-        tokenModalOpen = true;
-        document.getElementById("vpnToken").focus();
+function logDisplayText(logTail, waitingForToken) {
+    let text = logTail || "";
+    if (waitingForToken) {
+        text = text.replace(/\n?Code:\s*$/i, "");
     }
+    return text;
 }
 
-function closeTokenModal() {
-    document.getElementById("tokenModal").classList.add("hidden");
-    tokenModalOpen = false;
+function renderInteractiveTerminal(logTail, waitingForToken) {
+    const output = document.getElementById("logOutput");
+    const inputRow = document.getElementById("logInputRow");
+    const input = document.getElementById("logTerminalInput");
+    const terminal = document.getElementById("logTerminal");
+
+    output.textContent = logDisplayText(logTail, waitingForToken);
+
+    if (waitingForToken) {
+        inputRow.classList.remove("hidden");
+        terminal.classList.add("log-terminal-active");
+        if (document.activeElement !== input && !tokenSubmitting) {
+            input.focus();
+        }
+    } else {
+        inputRow.classList.add("hidden");
+        terminal.classList.remove("log-terminal-active");
+        if (!tokenSubmitting) {
+            input.value = "";
+        }
+    }
+
+    output.scrollTop = output.scrollHeight;
 }
 
 function vpnWaitingForToken(vpn, logTail, waitingFlag) {
@@ -80,23 +97,18 @@ function renderVPN(vpn, logTail, waitingFlag) {
     if (vpn.phase === "connected") {
         details.textContent = `${vpn.profile_name || vpn.profile_id} via ${vpn.tun_iface || "tun"} since ${vpn.since || "?"}`;
         disconnectBtn.disabled = false;
-        closeTokenModal();
     } else if (waitingForToken) {
-        details.textContent = "Enter your one-time token in the popup.";
+        details.textContent = "Type your token after Code: in the connection log below (Enter to submit).";
         disconnectBtn.disabled = false;
-        openTokenModal(vpn.input_prompt);
     } else if (vpn.phase === "connecting") {
         details.textContent = `Connecting to ${vpn.profile_name || vpn.profile_id || "VPN"}...`;
         disconnectBtn.disabled = false;
-        closeTokenModal();
     } else if (vpn.phase === "error") {
         details.textContent = vpn.last_error || "Connection failed";
         disconnectBtn.disabled = true;
-        closeTokenModal();
     } else {
         details.textContent = vpn.last_error || "LAN uses direct WAN NAT";
         disconnectBtn.disabled = true;
-        closeTokenModal();
     }
 
     reconnectBtn.disabled = vpn.phase === "connecting" || waitingForToken;
@@ -241,7 +253,8 @@ async function refresh() {
         renderTailscale(data.tailscale);
         renderWiFiAP(data.network);
         renderProfiles(data.profiles || [], data.vpn, waiting, logTail);
-        document.getElementById("logTail").textContent = logTail;
+        const waitingForToken = vpnWaitingForToken(data.vpn, logTail, waiting);
+        renderInteractiveTerminal(logTail, waitingForToken);
 
         const active = data.vpn.phase === "connecting" || data.vpn.phase === "need_input";
         schedulePoll(active);
@@ -281,23 +294,28 @@ async function startConnect(profileId, password) {
         return;
     }
     closeConnectModal();
-    showInfo("Connecting... FortiToken popup will appear when required", "info");
+    showInfo("Connecting... type FortiToken in the log when Code: appears", "info");
     refresh();
 }
 
 async function submitToken() {
-    const token = document.getElementById("vpnToken").value.trim();
+    const input = document.getElementById("logTerminalInput");
+    const token = input.value.trim();
+    tokenSubmitting = true;
     const res = await fetch("/api/vpn/input", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token })
     });
+    tokenSubmitting = false;
     if (!res.ok) {
         showInfo(await res.text(), "error");
         return;
     }
-    document.getElementById("vpnToken").value = "";
-    closeTokenModal();
+    const output = document.getElementById("logOutput");
+    const echo = token || "(push notification sent)";
+    output.textContent += `\nCode: ${echo}\n`;
+    input.value = "";
     showInfo("Token sent", "ok");
     refresh();
 }
@@ -370,9 +388,19 @@ document.getElementById("connectConfirmBtn").addEventListener("click", () => {
     startConnect(connectProfileId, document.getElementById("connectPassword").value);
 });
 document.getElementById("connectCancelBtn").addEventListener("click", closeConnectModal);
-document.getElementById("submitTokenBtn").addEventListener("click", submitToken);
-document.getElementById("vpnToken").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") submitToken();
+
+document.getElementById("logTerminalInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        submitToken();
+    }
+});
+
+document.getElementById("logTerminal").addEventListener("click", () => {
+    const inputRow = document.getElementById("logInputRow");
+    if (!inputRow.classList.contains("hidden")) {
+        document.getElementById("logTerminalInput").focus();
+    }
 });
 
 document.getElementById("disconnectBtn").addEventListener("click", async () => {
@@ -391,7 +419,7 @@ document.getElementById("reconnectBtn").addEventListener("click", async () => {
         showInfo(await res.text(), "error");
         return;
     }
-    showInfo("Reconnecting... FortiToken popup will appear when required", "info");
+    showInfo("Reconnecting... type FortiToken in the log when Code: appears", "info");
     refresh();
 });
 

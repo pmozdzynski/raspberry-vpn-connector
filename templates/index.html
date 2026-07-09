@@ -16,24 +16,10 @@
             <label>Password
                 <input type="password" id="connectPassword" autocomplete="current-password">
             </label>
-            <p class="muted small">A FortiToken popup will appear after the password is accepted.</p>
+            <p class="muted small">A FortiToken code will be requested in the connection log below.</p>
             <div class="button-row">
                 <button id="connectConfirmBtn" class="primary">Connect</button>
                 <button id="connectCancelBtn" class="secondary">Cancel</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="tokenModal" class="modal modal-front hidden">
-        <div class="modal-content">
-            <h3>FortiToken required</h3>
-            <p id="tokenModalPrompt" class="muted">Enter your one-time token or OTP code.</p>
-            <label>Token / OTP
-                <input type="text" id="vpnToken" inputmode="numeric" autocomplete="one-time-code" placeholder="123456">
-            </label>
-            <p class="muted small">Leave empty and submit to send a push notification to FortiToken Mobile.</p>
-            <div class="button-row">
-                <button id="submitTokenBtn" class="primary">Submit token</button>
             </div>
         </div>
     </div>
@@ -108,7 +94,13 @@
             </form>
         </div>
 
-        <pre id="logTail" class="log-tail"></pre>
+        <div id="logTerminal" class="log-terminal" tabindex="0">
+            <pre id="logOutput" class="log-output"></pre>
+            <div id="logInputRow" class="log-input-row hidden">
+                <span class="log-prompt">Code:</span>
+                <input type="text" id="logTerminalInput" inputmode="numeric" autocomplete="one-time-code" spellcheck="false" aria-label="FortiToken code">
+            </div>
+        </div>
     </div>
 
     <script src="app.js"></script>

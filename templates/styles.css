@@ -131,15 +131,65 @@ button:disabled {
 .info-box.error { background: #ffebee; color: #b71c1c; }
 .info-box.ok { background: #e8f5e9; color: #1b5e20; }
 
-.log-tail {
+.log-terminal {
   text-align: left;
   background: #111;
   color: #ddd;
   padding: 12px;
   border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.85em;
-  overflow-x: auto;
+  min-height: 200px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  cursor: text;
+}
+
+.log-terminal-active {
+  outline: 2px solid #2e7d32;
+  outline-offset: 2px;
+}
+
+.log-output {
+  flex: 1;
+  overflow: auto;
+  margin: 0;
   white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid #333;
+}
+
+.log-input-row.hidden {
+  display: none;
+}
+
+.log-prompt {
+  color: #ddd;
+  flex-shrink: 0;
+}
+
+.log-input-row input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font: inherit;
+  outline: none;
+  caret-color: #fff;
+}
+
+.log-input-row input::placeholder {
+  color: #666;
 }
 
 .progress-log {
