@@ -227,9 +227,10 @@ button:disabled {
 .token-panel {
   margin: 12px 0;
   padding: 12px;
-  border: 1px dashed #2e7d32;
+  border: 2px solid #2e7d32;
   border-radius: 8px;
   text-align: left;
+  background: #f1f8e9;
 }
 
 .modal {

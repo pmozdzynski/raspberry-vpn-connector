@@ -90,12 +90,22 @@ func GetVPNState() VPNState {
 			maybePromoteTokenPrompt(&st)
 			return st
 		}
+		// OpenConnect may still be waiting for FortiToken on stdin even when pgrep
+		// briefly misses the process or the tracked session was lost.
+		if prompt, ok := detectTokenPrompt(readLogTail(120)); ok {
+			st.Phase = VPNPhaseNeedInput
+			st.InputPrompt = prompt
+			st.InputKind = "token"
+			return st
+		}
 		if st.Phase != VPNPhaseConnected {
 			st.Phase = VPNPhaseDisconnected
 			st.Connected = false
 		}
 		return st
 	}
+
+	st = applyTokenPromptFromLog(st, running)
 
 	st.Connected = running
 	tun := st.TunIface
@@ -270,7 +280,12 @@ func StartConnect(profileID, password string) error {
 	stdinReader, stdinWriter := io.Pipe()
 	args := buildOpenConnectArgs(profile)
 
-	cmd := exec.Command("openconnect", args...)
+	var cmd *exec.Cmd
+	if stdbufPath, err := exec.LookPath("stdbuf"); err == nil {
+		cmd = exec.Command(stdbufPath, append([]string{"-oL", "-eL", "openconnect"}, args...)...)
+	} else {
+		cmd = exec.Command("openconnect", args...)
+	}
 	cmd.Stdin = stdinReader
 	logOut, _ := os.OpenFile(logFile, os.O_APPEND|os.O_WRONLY, 0644)
 	if logOut != nil {
@@ -349,6 +364,10 @@ func monitorVPNSession(sess *vpnConn) {
 			parentAlive := processAlive(sess.cmd)
 			childAlive := openConnectChildAlive()
 			if !parentAlive && !childAlive {
+				if _, ok := detectTokenPrompt(readLogTail(120)); ok && sess.passwordSent && !sess.inputSent {
+					saveTokenPromptState(sess)
+					continue
+				}
 				if !sess.parentDeadAt.IsZero() && time.Since(sess.parentDeadAt) < 8*time.Second {
 					continue
 				}
@@ -698,20 +717,43 @@ func SubmitVPNInput(input string) error {
 	vpnMu.Lock()
 	defer vpnMu.Unlock()
 
+	input = strings.TrimSpace(input)
+	// Empty input sends a blank line for FortiToken Mobile push notification.
+
 	if activeVPNSession == nil {
-		return fmt.Errorf("no active VPN connection attempt")
+		pid := findOpenConnectPID()
+		if pid <= 0 {
+			return fmt.Errorf("no active VPN connection attempt")
+		}
+		if _, ok := detectTokenPrompt(readLogTail(120)); !ok {
+			return fmt.Errorf("no active VPN connection attempt")
+		}
+		if err := writeOpenConnectStdin(pid, input); err != nil {
+			return fmt.Errorf("failed to send input to openconnect: %w", err)
+		}
+		st := readVPNStateFile()
+		saveVPNState(VPNState{
+			Phase:       VPNPhaseConnecting,
+			ProfileID:   st.ProfileID,
+			ProfileName: st.ProfileName,
+			ServerURL:   st.ServerURL,
+			InputKind:   "token",
+		})
+		return nil
 	}
+
 	st := readVPNStateFile()
 	if st.Phase != VPNPhaseNeedInput && st.Phase != VPNPhaseConnecting {
 		return fmt.Errorf("VPN is not waiting for input")
 	}
-	input = strings.TrimSpace(input)
-	// Empty input sends a blank line for FortiToken Mobile push notification.
 
 	if _, err := fmt.Fprintf(activeVPNSession.stdin, "%s\n", input); err != nil {
-		return fmt.Errorf("failed to send input to openconnect: %w", err)
+		if err := writeOpenConnectStdin(findOpenConnectPID(), input); err != nil {
+			return fmt.Errorf("failed to send input to openconnect: %w", err)
+		}
+	} else {
+		activeVPNSession.inputSent = true
 	}
-	activeVPNSession.inputSent = true
 
 	saveVPNState(VPNState{
 		Phase:       VPNPhaseConnecting,
@@ -720,6 +762,22 @@ func SubmitVPNInput(input string) error {
 		ServerURL:   activeVPNSession.profile.ServerURL,
 		InputKind:   "token",
 	})
+	return nil
+}
+
+func writeOpenConnectStdin(pid int, input string) error {
+	if pid <= 0 {
+		return fmt.Errorf("openconnect pid not found")
+	}
+	path := fmt.Sprintf("/proc/%d/fd/0", pid)
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := fmt.Fprintf(f, "%s\n", input); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -841,7 +899,10 @@ func saveTokenPromptState(sess *vpnConn) {
 }
 
 func maybePromoteTokenPrompt(st *VPNState) {
-	if st == nil || st.Phase != VPNPhaseConnecting {
+	if st == nil {
+		return
+	}
+	if st.Phase != VPNPhaseConnecting && st.Phase != VPNPhaseNeedInput {
 		return
 	}
 	prompt, ok := detectTokenPrompt(readLogTail(120))
@@ -852,6 +913,33 @@ func maybePromoteTokenPrompt(st *VPNState) {
 	st.InputPrompt = prompt
 	st.InputKind = "token"
 	saveVPNState(*st)
+}
+
+func applyTokenPromptFromLog(st VPNState, running bool) VPNState {
+	if st.Phase == VPNPhaseConnected || !running {
+		return st
+	}
+	prompt, ok := detectTokenPrompt(readLogTail(120))
+	if !ok {
+		return st
+	}
+	st.Phase = VPNPhaseNeedInput
+	st.InputPrompt = prompt
+	st.InputKind = "token"
+	st.LastError = ""
+	return st
+}
+
+func VPNWaitingForToken() bool {
+	st := GetVPNState()
+	if st.Phase == VPNPhaseNeedInput {
+		return true
+	}
+	if st.Phase == VPNPhaseConnected {
+		return false
+	}
+	_, ok := detectTokenPrompt(readLogTail(120))
+	return ok && isOpenConnectRunning()
 }
 
 func detectTokenPrompt(logContent string) (string, bool) {

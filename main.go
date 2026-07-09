@@ -29,6 +29,7 @@ func main() {
 	fs := http.FileServer(http.Dir("./templates"))
 	serveStatic := func(name string) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-cache")
 			fs.ServeHTTP(w, r)
 		}
 	}
