@@ -50,6 +50,7 @@ type vpnConn struct {
 	profile        VPNProfile
 	stopCh         chan struct{}
 	passwordSent   bool
+	passwordSentAt time.Time
 	inputSent      bool
 	parentDeadAt   time.Time
 	connectApplied sync.Once
@@ -290,17 +291,7 @@ func StartConnect(profileID, password string) error {
 	})
 
 	go watchOpenConnectProcess(sess)
-
-	go func() {
-		if _, err := fmt.Fprintf(stdinWriter, "%s\n", pass); err != nil {
-			log.Printf("write password to openconnect: %v", err)
-		}
-		vpnMu.Lock()
-		if activeVPNSession == sess {
-			sess.passwordSent = true
-		}
-		vpnMu.Unlock()
-	}()
+	go sendInitialPassword(sess, stdinWriter, pass)
 
 	go monitorVPNSession(sess)
 	return nil
@@ -354,7 +345,29 @@ func monitorVPNSession(sess *vpnConn) {
 				continue
 			}
 
-			if prompt, ok := detectTokenPrompt(readLogTail(80)); ok && !sess.inputSent {
+			logTail := readLogTail(80)
+
+			if sess.inputSent {
+				continue
+			}
+
+			if prompt, ok := detectPasswordRetryPrompt(logTail, sess.passwordSentAt); ok {
+				vpnMu.Lock()
+				if activeVPNSession == sess {
+					saveVPNState(VPNState{
+						Phase:       VPNPhaseNeedInput,
+						ProfileID:   sess.profile.ID,
+						ProfileName: sess.profile.Name,
+						ServerURL:   sess.profile.ServerURL,
+						InputPrompt: prompt,
+						InputKind:   "password",
+					})
+				}
+				vpnMu.Unlock()
+				continue
+			}
+
+			if prompt, ok := detectTokenPrompt(logTail); ok {
 				vpnMu.Lock()
 				if activeVPNSession == sess {
 					saveVPNState(VPNState{
@@ -504,9 +517,12 @@ func handleOpenConnectStoppedLocked(sess *vpnConn, reason error) {
 			LastError:   disconnectReasonFromLog(reason),
 		})
 	case VPNPhaseConnecting, VPNPhaseNeedInput:
-		msg := "openconnect exited before tunnel was established"
-		if reason != nil {
-			msg = reason.Error()
+		msg := connectionErrorFromLog()
+		if msg == "" {
+			msg = "openconnect exited before tunnel was established"
+			if reason != nil {
+				msg = reason.Error()
+			}
 		}
 		saveVPNState(VPNState{
 			Phase:     VPNPhaseError,
@@ -615,6 +631,9 @@ func buildOpenConnectArgs(profile VPNProfile) []string {
 }
 
 func disconnectReasonFromLog(reason error) string {
+	if msg := connectionErrorFromLog(); msg != "" {
+		return msg
+	}
 	tail := strings.ToLower(readLogTail(30))
 	switch {
 	case strings.Contains(tail, "cookie is no longer valid"), strings.Contains(tail, "cookie was rejected"):
@@ -664,6 +683,9 @@ func scheduleAutoReconnect(profileID string) {
 }
 
 func failSession(sess *vpnConn, msg string) {
+	if better := connectionErrorFromLog(); better != "" {
+		msg = better
+	}
 	vpnMu.Lock()
 	if activeVPNSession != sess {
 		vpnMu.Unlock()
@@ -698,17 +720,29 @@ func SubmitVPNInput(input string) error {
 		return fmt.Errorf("input required")
 	}
 
+	inputKind := st.InputKind
+	if inputKind == "" {
+		inputKind = "token"
+	}
+
 	if _, err := fmt.Fprintf(activeVPNSession.stdin, "%s\n", input); err != nil {
 		return fmt.Errorf("failed to send input to openconnect: %w", err)
 	}
-	activeVPNSession.inputSent = true
+
+	if inputKind == "password" {
+		activeVPNSession.passwordSent = true
+		activeVPNSession.passwordSentAt = time.Now()
+		activeVPNSession.inputSent = false
+	} else {
+		activeVPNSession.inputSent = true
+	}
 
 	saveVPNState(VPNState{
 		Phase:       VPNPhaseConnecting,
 		ProfileID:   activeVPNSession.profile.ID,
 		ProfileName: activeVPNSession.profile.Name,
 		ServerURL:   activeVPNSession.profile.ServerURL,
-		InputKind:   "token",
+		InputKind:   inputKind,
 	})
 	return nil
 }
@@ -813,12 +847,15 @@ func detectTokenPrompt(logContent string) (string, bool) {
 		if line == "" {
 			continue
 		}
+		if isPasswordPromptLine(line) {
+			return "", false
+		}
 		lower := strings.ToLower(line)
 		keywords := []string{
 			"one-time password", "one time password", "fortitoken", "token code",
-			"enter token", "enter otp", "authentication code", "secondary password",
+			"enter token", "enter otp", "authentication code",
 			"two-factor", "2fa", "passcode", "please enter your response",
-			"please enter", "enter code",
+			"enter code",
 		}
 		for _, kw := range keywords {
 			if strings.Contains(lower, kw) {
@@ -826,6 +863,88 @@ func detectTokenPrompt(logContent string) (string, bool) {
 			}
 		}
 		if strings.Contains(lower, "token") && strings.Contains(lower, "enter") {
+			return line, true
+		}
+	}
+	return "", false
+}
+
+func sendInitialPassword(sess *vpnConn, stdin io.Writer, password string) {
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		vpnMu.Lock()
+		active := activeVPNSession == sess
+		vpnMu.Unlock()
+		if !active {
+			return
+		}
+		if isPasswordPromptReady(readLogTail(40)) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	if _, err := fmt.Fprintf(stdin, "%s\n", password); err != nil {
+		log.Printf("write password to openconnect: %v", err)
+	}
+	vpnMu.Lock()
+	if activeVPNSession == sess {
+		sess.passwordSent = true
+		sess.passwordSentAt = time.Now()
+	}
+	vpnMu.Unlock()
+}
+
+func isPasswordPromptReady(logContent string) bool {
+	lower := strings.ToLower(logContent)
+	return strings.Contains(lower, "password:") ||
+		strings.Contains(lower, "/remote/logincheck") ||
+		strings.Contains(lower, "connected to https")
+}
+
+func isPasswordPromptLine(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(line))
+	if lower == "" {
+		return false
+	}
+	if strings.Contains(lower, "one-time password") || strings.Contains(lower, "one time password") {
+		return false
+	}
+	return lower == "password:" || strings.HasSuffix(lower, " password:")
+}
+
+func detectPasswordRetryPrompt(logContent string, passwordSentAt time.Time) (string, bool) {
+	if passwordSentAt.IsZero() || time.Since(passwordSentAt) < 2*time.Second {
+		return "", false
+	}
+	line, ok := lastNonEmptyLogLine(logContent)
+	if !ok || !isPasswordPromptLine(line) {
+		return "", false
+	}
+	return "VPN server is asking for your password again.", true
+}
+
+func connectionErrorFromLog() string {
+	tail := strings.ToLower(readLogTail(40))
+	if line, ok := lastNonEmptyLogLine(readLogTail(40)); ok && isPasswordPromptLine(line) {
+		return "VPN is waiting for a password — use the input field above."
+	}
+	switch {
+	case strings.Contains(tail, "authentication failed"),
+		strings.Contains(tail, "login denied"),
+		strings.Contains(tail, "login failed"):
+		return "VPN authentication failed (wrong username or password)."
+	case strings.Contains(tail, "certificate verify failed") && !strings.Contains(tail, "connected to https"):
+		return "Server certificate verification failed — check server cert pin in profile."
+	}
+	return ""
+}
+
+func lastNonEmptyLogLine(logContent string) (string, bool) {
+	lines := strings.Split(logContent, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line != "" {
 			return line, true
 		}
 	}

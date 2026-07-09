@@ -105,8 +105,9 @@ func VPNConnectHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type vpnInputRequest struct {
-	Input string `json:"input"`
-	Token string `json:"token"`
+	Input    string `json:"input"`
+	Token    string `json:"token"`
+	Password string `json:"password"`
 }
 
 func VPNInputHandler(w http.ResponseWriter, r *http.Request) {
@@ -122,6 +123,9 @@ func VPNInputHandler(w http.ResponseWriter, r *http.Request) {
 	input := strings.TrimSpace(req.Input)
 	if input == "" {
 		input = strings.TrimSpace(req.Token)
+	}
+	if input == "" {
+		input = strings.TrimSpace(req.Password)
 	}
 	if err := SubmitVPNInput(input); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

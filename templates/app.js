@@ -17,11 +17,18 @@ async function fetchStatus() {
     return res.json();
 }
 
-function phaseLabel(phase) {
+let editingProfile = null;
+let connectProfileId = null;
+let pollTimer = null;
+let lastVPNPhase = null;
+let statusFailCount = 0;
+let currentInputKind = "token";
+
+function phaseLabel(phase, inputKind) {
     switch (phase) {
         case "connected": return "Connected";
         case "connecting": return "Connecting...";
-        case "need_input": return "Token required";
+        case "need_input": return inputKind === "password" ? "Password required" : "Token required";
         case "error": return "Error";
         default: return "Disconnected";
     }
@@ -34,35 +41,58 @@ function renderVPN(vpn) {
     const reconnectBtn = document.getElementById("reconnectBtn");
     const tokenPanel = document.getElementById("tokenPanel");
     const tokenPrompt = document.getElementById("tokenPrompt");
+    const vpnToken = document.getElementById("vpnToken");
+    const submitTokenBtn = document.getElementById("submitTokenBtn");
 
-    state.textContent = phaseLabel(vpn.phase);
-    state.className = vpn.phase === "connected" ? "ok" : (vpn.phase === "error" ? "error-text" : "muted");
+    const inputKind = vpn.input_kind || "token";
+    currentInputKind = inputKind;
+    const isPassword = inputKind === "password";
 
-    if (vpn.phase === "connected") {
-        details.textContent = `${vpn.profile_name || vpn.profile_id} via ${vpn.tun_iface || "tun"} since ${vpn.since || "?"}`;
-        disconnectBtn.disabled = false;
-        tokenPanel.classList.add("hidden");
-    } else if (vpn.phase === "connecting") {
-        details.textContent = `Connecting to ${vpn.profile_name || vpn.profile_id || "VPN"}...`;
-        disconnectBtn.disabled = false;
-        tokenPanel.classList.add("hidden");
-    } else if (vpn.phase === "need_input") {
-        details.textContent = "Enter your one-time token or OTP code.";
-        tokenPrompt.textContent = vpn.input_prompt || "VPN server is waiting for a one-time token.";
-        tokenPanel.classList.remove("hidden");
-        disconnectBtn.disabled = false;
-        document.getElementById("vpnToken").focus();
-    } else if (vpn.phase === "error") {
-        details.textContent = vpn.last_error || "Connection failed";
-        disconnectBtn.disabled = true;
-        tokenPanel.classList.add("hidden");
-    } else {
-        details.textContent = vpn.last_error || "LAN uses direct WAN NAT";
-        disconnectBtn.disabled = true;
-        tokenPanel.classList.add("hidden");
+    if (state) {
+        state.textContent = phaseLabel(vpn.phase, inputKind);
+        state.className = vpn.phase === "connected" ? "ok" : (vpn.phase === "error" ? "error-text" : "muted");
     }
 
-    reconnectBtn.disabled = vpn.phase === "connecting" || vpn.phase === "need_input";
+    if (vpn.phase === "connected") {
+        if (details) details.textContent = `${vpn.profile_name || vpn.profile_id} via ${vpn.tun_iface || "tun"} since ${vpn.since || "?"}`;
+        if (disconnectBtn) disconnectBtn.disabled = false;
+        if (tokenPanel) tokenPanel.classList.add("hidden");
+    } else if (vpn.phase === "connecting") {
+        if (details) details.textContent = `Connecting to ${vpn.profile_name || vpn.profile_id || "VPN"}...`;
+        if (disconnectBtn) disconnectBtn.disabled = false;
+        if (tokenPanel) tokenPanel.classList.add("hidden");
+    } else if (vpn.phase === "need_input") {
+        if (details) {
+            details.textContent = isPassword
+                ? "Re-enter your VPN password below."
+                : "Enter your one-time token or OTP code.";
+        }
+        if (tokenPrompt) {
+            tokenPrompt.textContent = vpn.input_prompt || (isPassword
+                ? "Password was not accepted — try again."
+                : "VPN server is waiting for a one-time token.");
+        }
+        if (vpnToken) {
+            vpnToken.type = isPassword ? "password" : "text";
+            vpnToken.inputMode = isPassword ? "" : "numeric";
+            vpnToken.autocomplete = isPassword ? "current-password" : "one-time-code";
+            vpnToken.placeholder = isPassword ? "" : "123456";
+        }
+        if (submitTokenBtn) submitTokenBtn.textContent = isPassword ? "Submit password" : "Submit token";
+        if (tokenPanel) tokenPanel.classList.remove("hidden");
+        if (disconnectBtn) disconnectBtn.disabled = false;
+        if (vpnToken) vpnToken.focus();
+    } else if (vpn.phase === "error") {
+        if (details) details.textContent = vpn.last_error || "Connection failed";
+        if (disconnectBtn) disconnectBtn.disabled = true;
+        if (tokenPanel) tokenPanel.classList.add("hidden");
+    } else {
+        if (details) details.textContent = vpn.last_error || "LAN uses direct WAN NAT";
+        if (disconnectBtn) disconnectBtn.disabled = true;
+        if (tokenPanel) tokenPanel.classList.add("hidden");
+    }
+
+    if (reconnectBtn) reconnectBtn.disabled = vpn.phase === "connecting" || vpn.phase === "need_input";
 }
 
 function renderProfiles(profiles, vpn) {
@@ -184,22 +214,25 @@ async function startConnect(profileId, password) {
 }
 
 async function submitToken() {
-    const token = document.getElementById("vpnToken").value.trim();
-    if (!token) {
-        showInfo("Enter the token code", "error");
+    const vpnToken = document.getElementById("vpnToken");
+    if (!vpnToken) return;
+    const value = vpnToken.value.trim();
+    if (!value) {
+        showInfo(currentInputKind === "password" ? "Enter your password" : "Enter the token code", "error");
         return;
     }
+    const body = currentInputKind === "password" ? { password: value } : { token: value };
     const res = await fetch("/api/vpn/input", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token })
+        body: JSON.stringify(body)
     });
     if (!res.ok) {
         showInfo(await res.text(), "error");
         return;
     }
-    document.getElementById("vpnToken").value = "";
-    showInfo("Token sent", "ok");
+    vpnToken.value = "";
+    showInfo(currentInputKind === "password" ? "Password sent" : "Token sent", "ok");
     refresh();
 }
 
