@@ -21,13 +21,6 @@
             <p id="vpnDetails" class="muted"></p>
             <p id="wifiApStatus" class="muted small"></p>
             <p id="mgmtHint" class="muted small"></p>
-            <div id="tokenPanel" class="token-panel hidden">
-                <p id="tokenPrompt" class="muted"></p>
-                <label>Token / OTP
-                    <input type="text" id="vpnToken" inputmode="numeric" autocomplete="one-time-code" placeholder="123456">
-                </label>
-                <button id="submitTokenBtn" class="primary">Submit token</button>
-            </div>
             <div class="button-row">
                 <button id="disconnectBtn" class="danger" disabled>Disconnect</button>
                 <button id="reconnectBtn" class="secondary" disabled>Reconnect last</button>
@@ -41,13 +34,24 @@
                 <label>Password
                     <input type="password" id="connectPassword" autocomplete="current-password">
                 </label>
-                <label>FortiToken / OTP <span class="muted">(optional)</span>
-                    <input type="text" id="connectToken" inputmode="numeric" autocomplete="one-time-code" placeholder="123456">
-                </label>
-                <p class="muted small">Enter password and token together if you have the code. Leave token empty to enter it later or send a push notification.</p>
+                <p class="muted small">A FortiToken code will be requested in a popup after the password is accepted.</p>
                 <div class="button-row">
                     <button id="connectConfirmBtn" class="primary">Connect</button>
                     <button id="connectCancelBtn" class="secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="tokenModal" class="modal hidden">
+            <div class="modal-content">
+                <h3>FortiToken required</h3>
+                <p id="tokenModalPrompt" class="muted">Enter your one-time token or OTP code.</p>
+                <label>Token / OTP
+                    <input type="text" id="vpnToken" inputmode="numeric" autocomplete="one-time-code" placeholder="123456">
+                </label>
+                <p class="muted small">Leave empty and submit to send a push notification to FortiToken Mobile.</p>
+                <div class="button-row">
+                    <button id="submitTokenBtn" class="primary">Submit token</button>
                 </div>
             </div>
         </div>

@@ -51,7 +51,6 @@ type vpnConn struct {
 	stopCh         chan struct{}
 	passwordSent   bool
 	inputSent      bool
-	pendingToken   string
 	parentDeadAt   time.Time
 	connectApplied sync.Once
 }
@@ -87,19 +86,14 @@ func GetVPNState() VPNState {
 				return st
 			}
 		}
-		if running || hasActiveVPNSession() {
+		if running {
 			maybePromoteTokenPrompt(&st)
 			return st
-		}
-		if st.Phase == VPNPhaseNeedInput {
-			st.InputPrompt = ""
-			st.InputKind = ""
 		}
 		if st.Phase != VPNPhaseConnected {
 			st.Phase = VPNPhaseDisconnected
 			st.Connected = false
 		}
-		saveVPNState(st)
 		return st
 	}
 
@@ -247,7 +241,7 @@ func tunnelReady(iface string) bool {
 	return iface != "" && interfaceHasIPv4(iface)
 }
 
-func StartConnect(profileID, password, token string) error {
+func StartConnect(profileID, password string) error {
 	vpnMu.Lock()
 	defer vpnMu.Unlock()
 
@@ -296,11 +290,10 @@ func StartConnect(profileID, password, token string) error {
 	writeOpenConnectPID(cmd.Process.Pid)
 
 	sess := &vpnConn{
-		cmd:          cmd,
-		stdin:        stdinWriter,
-		profile:      profile,
-		stopCh:       make(chan struct{}),
-		pendingToken: strings.TrimSpace(token),
+		cmd:     cmd,
+		stdin:   stdinWriter,
+		profile: profile,
+		stopCh:  make(chan struct{}),
 	}
 	activeVPNSession = sess
 
@@ -379,7 +372,7 @@ func monitorVPNSession(sess *vpnConn) {
 				continue
 			}
 
-			syncTokenPromptState(sess)
+			saveTokenPromptState(sess)
 		}
 	}
 }
@@ -479,7 +472,7 @@ func watchOpenConnectProcess(sess *vpnConn) {
 			ignoreTunInNetworkManager(tun)
 			finishConnected(sess, tun)
 		} else {
-			syncTokenPromptState(sess)
+			saveTokenPromptState(sess)
 		}
 		log.Printf("openconnect parent exited (%v); tracking pid %d", waitErr, childPID)
 		go watchOpenConnectPID(sess, childPID)
@@ -487,7 +480,7 @@ func watchOpenConnectProcess(sess *vpnConn) {
 	}
 
 	if _, ok := detectTokenPrompt(readLogTail(120)); ok {
-		syncTokenPromptState(sess)
+		saveTokenPromptState(sess)
 		log.Printf("openconnect waiting for token after parent exit")
 		return
 	}
@@ -676,7 +669,7 @@ func scheduleAutoReconnect(profileID string) {
 			return
 		}
 		log.Printf("Auto-reconnecting VPN profile %s", profile.Name)
-		if err := StartConnect(profile.ID, profile.Password, ""); err != nil {
+		if err := StartConnect(profile.ID, profile.Password); err != nil {
 			log.Printf("Auto-reconnect failed: %v", err)
 		}
 	}()
@@ -730,8 +723,8 @@ func SubmitVPNInput(input string) error {
 	return nil
 }
 
-func ConnectProfile(profileID, password, token string) error {
-	if err := StartConnect(profileID, password, token); err != nil {
+func ConnectProfile(profileID, password string) error {
+	if err := StartConnect(profileID, password); err != nil {
 		return err
 	}
 
@@ -820,18 +813,14 @@ func interfaceHasIPv4(iface string) bool {
 	return err == nil && strings.TrimSpace(string(out)) != ""
 }
 
-func syncTokenPromptState(sess *vpnConn) {
+func saveTokenPromptState(sess *vpnConn) {
 	if sess == nil || sess.inputSent || !sess.passwordSent {
 		return
 	}
-	if _, ok := detectTokenPrompt(readLogTail(120)); !ok {
+	prompt, ok := detectTokenPrompt(readLogTail(120))
+	if !ok {
 		return
 	}
-	if sess.pendingToken != "" {
-		trySendPendingToken(sess)
-		return
-	}
-
 	vpnMu.Lock()
 	defer vpnMu.Unlock()
 	if activeVPNSession != sess {
@@ -841,7 +830,6 @@ func syncTokenPromptState(sess *vpnConn) {
 	if st.Phase == VPNPhaseNeedInput {
 		return
 	}
-	prompt, _ := detectTokenPrompt(readLogTail(120))
 	saveVPNState(VPNState{
 		Phase:       VPNPhaseNeedInput,
 		ProfileID:   sess.profile.ID,
@@ -850,30 +838,6 @@ func syncTokenPromptState(sess *vpnConn) {
 		InputPrompt: prompt,
 		InputKind:   "token",
 	})
-}
-
-func trySendPendingToken(sess *vpnConn) bool {
-	if sess == nil || sess.inputSent || sess.pendingToken == "" || !sess.passwordSent {
-		return false
-	}
-	if _, ok := detectTokenPrompt(readLogTail(120)); !ok {
-		return false
-	}
-	if _, err := fmt.Fprintf(sess.stdin, "%s\n", sess.pendingToken); err != nil {
-		log.Printf("write pending token to openconnect: %v", err)
-		return false
-	}
-	sess.inputSent = true
-	sess.pendingToken = ""
-	saveVPNState(VPNState{
-		Phase:       VPNPhaseConnecting,
-		ProfileID:   sess.profile.ID,
-		ProfileName: sess.profile.Name,
-		ServerURL:   sess.profile.ServerURL,
-		InputKind:   "token",
-	})
-	log.Printf("Sent FortiToken supplied with connect request")
-	return true
 }
 
 func maybePromoteTokenPrompt(st *VPNState) {
@@ -948,7 +912,7 @@ func ReconnectLastProfile() error {
 	if !ok {
 		return fmt.Errorf("last profile not found")
 	}
-	return StartConnect(profile.ID, profile.Password, "")
+	return StartConnect(profile.ID, profile.Password)
 }
 
 func EnsureOpenConnectInstalled() error {

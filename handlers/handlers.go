@@ -82,7 +82,6 @@ func ProfilesHandler(w http.ResponseWriter, r *http.Request) {
 type connectRequest struct {
 	ProfileID string `json:"profile_id"`
 	Password  string `json:"password"`
-	Token     string `json:"token"`
 }
 
 func VPNConnectHandler(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +98,7 @@ func VPNConnectHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "profile_id required", http.StatusBadRequest)
 		return
 	}
-	if err := StartConnect(req.ProfileID, req.Password, req.Token); err != nil {
+	if err := StartConnect(req.ProfileID, req.Password); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

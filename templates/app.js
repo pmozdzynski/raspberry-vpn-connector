@@ -27,54 +27,52 @@ function phaseLabel(phase) {
     }
 }
 
-function logNeedsToken(logTail) {
-    const lower = (logTail || "").toLowerCase();
-    return lower.includes("fortitoken")
-        || lower.includes("token code")
-        || lower.includes("enter token")
-        || lower.includes("enter otp")
-        || /\ncode:\s*$/i.test(logTail || "");
+function openTokenModal(prompt) {
+    document.getElementById("tokenModalPrompt").textContent =
+        prompt || "VPN server is waiting for a one-time token.";
+    const modal = document.getElementById("tokenModal");
+    if (modal.classList.contains("hidden")) {
+        modal.classList.remove("hidden");
+        document.getElementById("vpnToken").focus();
+    }
 }
 
-function renderVPN(vpn, logTail) {
+function closeTokenModal() {
+    document.getElementById("tokenModal").classList.add("hidden");
+}
+
+function renderVPN(vpn) {
     const state = document.getElementById("vpnState");
     const details = document.getElementById("vpnDetails");
     const disconnectBtn = document.getElementById("disconnectBtn");
     const reconnectBtn = document.getElementById("reconnectBtn");
-    const tokenPanel = document.getElementById("tokenPanel");
-    const tokenPrompt = document.getElementById("tokenPrompt");
 
-    const waitingForToken = vpn.phase === "need_input"
-        || (vpn.phase === "connecting" && logNeedsToken(logTail));
-
-    state.textContent = waitingForToken ? "Token required" : phaseLabel(vpn.phase);
+    state.textContent = phaseLabel(vpn.phase);
     state.className = vpn.phase === "connected" ? "ok" : (vpn.phase === "error" ? "error-text" : "muted");
 
     if (vpn.phase === "connected") {
         details.textContent = `${vpn.profile_name || vpn.profile_id} via ${vpn.tun_iface || "tun"} since ${vpn.since || "?"}`;
         disconnectBtn.disabled = false;
-        tokenPanel.classList.add("hidden");
-    } else if (waitingForToken) {
-        details.textContent = "Enter your one-time token or OTP code.";
-        tokenPrompt.textContent = vpn.input_prompt || "FortiToken code required (check your mobile app or enter OTP).";
-        tokenPanel.classList.remove("hidden");
-        disconnectBtn.disabled = false;
-        document.getElementById("vpnToken").focus();
+        closeTokenModal();
     } else if (vpn.phase === "connecting") {
         details.textContent = `Connecting to ${vpn.profile_name || vpn.profile_id || "VPN"}...`;
         disconnectBtn.disabled = false;
-        tokenPanel.classList.add("hidden");
+        closeTokenModal();
+    } else if (vpn.phase === "need_input") {
+        details.textContent = "Enter your one-time token or OTP code in the popup.";
+        disconnectBtn.disabled = false;
+        openTokenModal(vpn.input_prompt);
     } else if (vpn.phase === "error") {
         details.textContent = vpn.last_error || "Connection failed";
         disconnectBtn.disabled = true;
-        tokenPanel.classList.add("hidden");
+        closeTokenModal();
     } else {
         details.textContent = vpn.last_error || "LAN uses direct WAN NAT";
         disconnectBtn.disabled = true;
-        tokenPanel.classList.add("hidden");
+        closeTokenModal();
     }
 
-    reconnectBtn.disabled = vpn.phase === "connecting" || vpn.phase === "need_input" || waitingForToken;
+    reconnectBtn.disabled = vpn.phase === "connecting" || vpn.phase === "need_input";
 }
 
 function renderProfiles(profiles, vpn) {
@@ -210,7 +208,7 @@ async function refresh() {
         statusFailCount = 0;
         const prevPhase = lastVPNPhase;
         lastVPNPhase = data.vpn.phase;
-        renderVPN(data.vpn, data.log_tail);
+        renderVPN(data.vpn);
         renderTailscale(data.tailscale);
         renderWiFiAP(data.network);
         renderProfiles(data.profiles || [], data.vpn);
@@ -234,7 +232,6 @@ function openConnectModal(id, name) {
     connectProfileId = id;
     document.getElementById("connectProfileName").textContent = name;
     document.getElementById("connectPassword").value = "";
-    document.getElementById("connectToken").value = "";
     document.getElementById("connectModal").classList.remove("hidden");
     document.getElementById("connectPassword").focus();
 }
@@ -244,18 +241,18 @@ function closeConnectModal() {
     document.getElementById("connectModal").classList.add("hidden");
 }
 
-async function startConnect(profileId, password, token) {
+async function startConnect(profileId, password) {
     const res = await fetch("/api/vpn/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile_id: profileId, password: password || "", token: token || "" })
+        body: JSON.stringify({ profile_id: profileId, password: password || "" })
     });
     if (!res.ok) {
         showInfo(await res.text(), "error");
         return;
     }
     closeConnectModal();
-    showInfo(token ? "Connecting with password and token..." : "Connecting... enter token if prompted", "info");
+    showInfo("Connecting... FortiToken popup will appear when required", "info");
     refresh();
 }
 
@@ -271,6 +268,7 @@ async function submitToken() {
         return;
     }
     document.getElementById("vpnToken").value = "";
+    closeTokenModal();
     showInfo("Token sent", "ok");
     refresh();
 }
@@ -340,11 +338,7 @@ document.getElementById("profileForm").addEventListener("submit", async (e) => {
 document.getElementById("clearFormBtn").addEventListener("click", clearForm);
 document.getElementById("connectConfirmBtn").addEventListener("click", () => {
     if (!connectProfileId) return;
-    startConnect(
-        connectProfileId,
-        document.getElementById("connectPassword").value,
-        document.getElementById("connectToken").value.trim()
-    );
+    startConnect(connectProfileId, document.getElementById("connectPassword").value);
 });
 document.getElementById("connectCancelBtn").addEventListener("click", closeConnectModal);
 document.getElementById("submitTokenBtn").addEventListener("click", submitToken);
@@ -368,7 +362,7 @@ document.getElementById("reconnectBtn").addEventListener("click", async () => {
         showInfo(await res.text(), "error");
         return;
     }
-    showInfo("Reconnecting... enter FortiToken if prompted", "info");
+    showInfo("Reconnecting... FortiToken popup will appear when required", "info");
     refresh();
 });
 

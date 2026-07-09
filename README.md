@@ -110,9 +110,9 @@ Enable **Save password** to reuse the password on reconnect. **FortiToken / OTP 
 
 ## FortiToken / 2FA flow
 
-1. Click **Connect** and enter your VPN **password** and **FortiToken / OTP** together (recommended).
-2. Or enter password only — if Fortinet asks later, the dashboard shows **Token required**.
-3. Leave token empty and click **Submit token** to send a push notification to FortiToken Mobile.
+1. Click **Connect** and enter your VPN password.
+2. When Fortinet asks, a **FortiToken popup** appears — enter the code and submit.
+3. Leave token empty and submit to send a push notification to FortiToken Mobile.
 4. Connection completes and LAN traffic is NATed through the VPN tunnel (corporate routes via VPN, general internet via WAN).
 
 ## Tailscale filtered exit node
