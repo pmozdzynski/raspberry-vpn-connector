@@ -3,6 +3,7 @@ let connectProfileId = null;
 let pollTimer = null;
 let lastVPNPhase = null;
 let statusFailCount = 0;
+let currentInputKind = "token";
 
 function showInfo(message, type = "info") {
     const box = document.getElementById("infoBox");
@@ -16,13 +17,6 @@ async function fetchStatus() {
     if (!res.ok) throw new Error("Failed to load status");
     return res.json();
 }
-
-let editingProfile = null;
-let connectProfileId = null;
-let pollTimer = null;
-let lastVPNPhase = null;
-let statusFailCount = 0;
-let currentInputKind = "token";
 
 function phaseLabel(phase, inputKind) {
     switch (phase) {
@@ -97,6 +91,7 @@ function renderVPN(vpn) {
 
 function renderProfiles(profiles, vpn) {
     const list = document.getElementById("profilesList");
+    if (!list) return;
     if (!profiles.length) {
         list.innerHTML = "<p class='muted'>No profiles yet. Add one below.</p>";
         return;
@@ -140,11 +135,13 @@ function schedulePoll(fast) {
 function renderWiFiAP(network) {
     const el = document.getElementById("wifiApStatus");
     const mgmt = document.getElementById("mgmtHint");
+    if (!mgmt) return;
     const ap = network?.wifi_ap;
     const ips = (network?.management_ips || []).map(ip => `http://${ip}:5000/`).join(" · ");
     mgmt.textContent = ips
         ? `Management (stays on WAN): ${ips} — also use LAN gateway after VPN is up`
         : "Use LAN gateway IP for dashboard if WAN URL stops responding during VPN connect";
+    if (!el) return;
     if (!ap?.enabled) {
         el.textContent = "";
         return;
@@ -169,7 +166,8 @@ async function refresh() {
         renderVPN(data.vpn);
         renderWiFiAP(data.network);
         renderProfiles(data.profiles || [], data.vpn);
-        document.getElementById("logTail").textContent = data.log_tail || "";
+        const logEl = document.getElementById("logTail");
+        if (logEl) logEl.textContent = data.log_tail || "(no log output yet)";
 
         const active = data.vpn.phase === "connecting" || data.vpn.phase === "need_input";
         schedulePoll(active);
@@ -179,7 +177,16 @@ async function refresh() {
         }
     } catch (err) {
         statusFailCount += 1;
-        if (statusFailCount >= 3) {
+        if (statusFailCount === 1) {
+            const state = document.getElementById("vpnState");
+            if (state) {
+                state.textContent = "Error";
+                state.className = "error-text";
+            }
+            const details = document.getElementById("vpnDetails");
+            if (details) details.textContent = "Could not load status: " + err.message;
+        }
+        if (statusFailCount >= 2) {
             showInfo(err.message, "error");
         }
     }
