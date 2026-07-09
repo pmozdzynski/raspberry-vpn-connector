@@ -107,6 +107,68 @@ function schedulePoll(fast) {
     pollTimer = setInterval(refresh, fast ? 1500 : 10000);
 }
 
+function renderTailscale(ts) {
+    const state = document.getElementById("tailscaleState");
+    const details = document.getElementById("tailscaleDetails");
+    const dnsHint = document.getElementById("tailscaleDNSHint");
+    const checkbox = document.getElementById("tailscaleExitNode");
+    const saveBtn = document.getElementById("tailscaleSaveBtn");
+
+    if (!ts) {
+        state.textContent = "Unavailable";
+        details.textContent = "";
+        dnsHint.textContent = "";
+        checkbox.disabled = true;
+        saveBtn.disabled = true;
+        return;
+    }
+
+    checkbox.checked = !!ts.exit_node_enabled;
+    checkbox.disabled = !ts.installed;
+    saveBtn.disabled = !ts.installed;
+
+    if (!ts.installed) {
+        state.textContent = "Tailscale not installed";
+        details.textContent = "Install tailscale and run tailscale up on the device first.";
+        dnsHint.textContent = "";
+        return;
+    }
+
+    const mode = ts.vpn_connected ? "VPN connected (split-tunnel)" : "VPN disconnected (WAN only, corp best-effort)";
+    const advertised = ts.advertised ? "advertised" : "not advertised yet (approve in Tailscale admin if needed)";
+    state.textContent = ts.running
+        ? `Running — exit node ${ts.exit_node_enabled ? advertised : "disabled"} — ${mode}`
+        : "Installed but not running (run: tailscale up)";
+
+    const parts = [];
+    if (ts.ipv4) parts.push(`Tailscale IP: ${ts.ipv4}`);
+    if (ts.hostname) parts.push(`DNS: ${ts.hostname}`);
+    details.textContent = parts.join(" · ");
+
+    if (ts.exit_node_enabled && ts.ipv4 && (ts.corp_dns_domains || []).length) {
+        dnsHint.textContent = `Configure Tailnet split DNS in the Tailscale admin console: domains ${ts.corp_dns_domains.join(", ")} → nameserver ${ts.ipv4}`;
+    } else if (ts.exit_node_enabled && ts.ipv4) {
+        dnsHint.textContent = `When VPN connects, configure Tailnet split DNS to ${ts.ipv4} for corporate domains.`;
+    } else {
+        dnsHint.textContent = "";
+    }
+}
+
+async function saveTailscaleSetting() {
+    const enabled = document.getElementById("tailscaleExitNode").checked;
+    const res = await fetch("/api/tailscale/exit-node", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled })
+    });
+    if (!res.ok) {
+        showInfo(await res.text(), "error");
+        return;
+    }
+    showInfo(enabled ? "Tailscale filtered exit node enabled" : "Tailscale exit node disabled", "ok");
+    refresh();
+}
+
 function renderWiFiAP(network) {
     const el = document.getElementById("wifiApStatus");
     const mgmt = document.getElementById("mgmtHint");
@@ -137,6 +199,7 @@ async function refresh() {
         const prevPhase = lastVPNPhase;
         lastVPNPhase = data.vpn.phase;
         renderVPN(data.vpn);
+        renderTailscale(data.tailscale);
         renderWiFiAP(data.network);
         renderProfiles(data.profiles || [], data.vpn);
         document.getElementById("logTail").textContent = data.log_tail || "";
@@ -295,5 +358,7 @@ document.getElementById("reconnectBtn").addEventListener("click", async () => {
     showInfo("Reconnecting... enter FortiToken if prompted", "info");
     refresh();
 });
+
+document.getElementById("tailscaleSaveBtn").addEventListener("click", saveTailscaleSetting);
 
 refresh();

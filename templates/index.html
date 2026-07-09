@@ -50,6 +50,20 @@
         </div>
 
         <div class="status-box">
+            <h3>Tailscale Exit Node</h3>
+            <p id="tailscaleState" class="muted">Loading...</p>
+            <p id="tailscaleDetails" class="muted small"></p>
+            <p id="tailscaleDNSHint" class="muted small"></p>
+            <label class="checkbox-label">
+                <input type="checkbox" id="tailscaleExitNode"> Advertise as filtered exit node
+            </label>
+            <p class="muted small">Corporate routes and DNS use OpenConnect when connected; everything else uses WAN. Works without VPN (best-effort via WAN).</p>
+            <div class="button-row">
+                <button id="tailscaleSaveBtn" class="secondary">Apply Tailscale setting</button>
+            </div>
+        </div>
+
+        <div class="status-box">
             <h3>Saved Profiles</h3>
             <div id="profilesList"></div>
         </div>

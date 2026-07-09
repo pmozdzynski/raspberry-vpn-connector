@@ -17,6 +17,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		"configured": IsConfigured(),
 		"network":    GetNetworkSnapshot(),
 		"vpn":        GetVPNState(),
+		"tailscale":  GetTailscaleStatus(),
 		"profiles":   public,
 		"log_tail":   OpenConnectLogTail(),
 	}
@@ -157,4 +158,28 @@ func VPNReconnectHandler(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
+}
+
+type tailscaleExitNodeRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+func TailscaleExitNodeHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, GetTailscaleStatus())
+	case http.MethodPost:
+		var req tailscaleExitNodeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if err := SetTailscaleExitNode(req.Enabled); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, GetTailscaleStatus())
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }

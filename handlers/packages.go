@@ -13,6 +13,7 @@ type PackageSnapshot struct {
 	Hostapd      bool `json:"hostapd"`
 	OpenConnect  bool `json:"openconnect"`
 	Iptables     bool `json:"iptables"`
+	Tailscale    bool `json:"tailscale"`
 }
 
 func GetPackageSnapshot() PackageSnapshot {
@@ -22,6 +23,7 @@ func GetPackageSnapshot() PackageSnapshot {
 		Hostapd:      commandExists("hostapd"),
 		OpenConnect:  commandExists("openconnect"),
 		Iptables:     commandExists("iptables"),
+		Tailscale:    commandExists("tailscale"),
 	}
 }
 

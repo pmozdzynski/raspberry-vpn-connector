@@ -107,7 +107,29 @@ Enable **Save password** to reuse the password on reconnect. **FortiToken / OTP 
 1. Click **Connect** and enter your VPN password.
 2. The dashboard shows **Token required** when Fortinet asks for a one-time code.
 3. Type the code from your token app/hardware key and click **Submit token**.
-4. Connection completes and LAN traffic is NATed through the VPN tunnel.
+4. Connection completes and LAN traffic is NATed through the VPN tunnel (corporate routes via VPN, general internet via WAN).
+
+## Tailscale filtered exit node
+
+Remote Tailscale clients can use this device as an exit node with **split-tunnel behavior**:
+
+- When OpenConnect is **connected**: corporate routes and corporate DNS zones go through the VPN tunnel; everything else uses the Pi's WAN.
+- When OpenConnect is **disconnected**: Tailscale exit node still works; all traffic (including attempted corporate access) is best-effort via WAN.
+
+Enable in the dashboard under **Tailscale Exit Node**, or via API:
+
+```bash
+curl -u admin:password -X POST http://<device-ip>:5000/api/tailscale/exit-node \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled": true}'
+```
+
+Requirements:
+
+1. Install Tailscale on the device and run `tailscale up`.
+2. Approve the exit node in the [Tailscale admin console](https://login.tailscale.com/admin/machines).
+3. On remote clients, select this device as the exit node in the Tailscale client.
+4. Configure **split DNS** in the Tailscale admin console: point corporate domains to the Pi's Tailscale IP shown in the dashboard.
 
 Works on Raspberry Pi and any Linux host with OpenConnect installed.
 
@@ -137,6 +159,7 @@ GOOS=linux GOARCH=arm64 go build -o vpn-connector .
 - `POST /api/vpn/input` - `{"token":"123456"}` during connection
 - `POST /api/vpn/disconnect`
 - `POST /api/vpn/reconnect` - uses last profile + saved password (token via UI)
+- `GET/POST /api/tailscale/exit-node` - filtered Tailscale exit node toggle
 
 ## Origin
 

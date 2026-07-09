@@ -91,6 +91,8 @@ func ApplyDirectNAT() error {
 		appendForward("-i", lan, "-o", wan, "-j", "ACCEPT")
 		appendForward("-i", wan, "-o", lan, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT")
 	}
+	appendTailscaleNAT(wan, "")
+	ensureForwardAccept()
 	_ = ApplyDirectDNS()
 	log.Printf("Direct NAT via %s", wan)
 	return nil
@@ -131,6 +133,7 @@ func ApplyVPNNAT(tunIface string) error {
 		ensureMSSClamp(tunIface)
 		ensureMSSClamp(wan)
 	}
+	appendTailscaleNAT(wan, tunIface)
 	ensureForwardAccept()
 	_ = ApplyVPNDNS()
 	log.Printf("VPN NAT via %s + internet via %s (split-tunnel)", tunIface, wan)
@@ -162,8 +165,11 @@ func ensureManagementFirewall(cfg RouterConfig) {
 		{"-p", "tcp", "--dport", "5000", "-j", "ACCEPT"},
 		{"-p", "tcp", "--sport", "5000", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"},
 	}
-	for _, iface := range []string{cfg.WANInterface, cfg.LANInterface} {
+	for _, iface := range []string{cfg.WANInterface, cfg.LANInterface, tailscaleInterface} {
 		if iface == "" {
+			continue
+		}
+		if iface == tailscaleInterface && !TailscaleExitNodeConfigured() {
 			continue
 		}
 		rules = append(rules,

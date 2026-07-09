@@ -30,6 +30,7 @@ type RouterConfig struct {
 	AdminUsername  string `json:"admin_username"`
 	AdminPassword  string `json:"admin_password"`
 	LastProfileID  string `json:"last_profile_id,omitempty"`
+	TailscaleExitNodeEnabled bool `json:"tailscale_exit_node_enabled,omitempty"`
 }
 
 var (

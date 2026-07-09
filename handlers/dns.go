@@ -258,18 +258,31 @@ func writeDnsmasqConfig(cfg RouterConfig, vpn *VPNDNSInfo, tunIface string) erro
 	netmask := prefixToNetmask(cfg.LANPrefix)
 	upstream := renderDnsmasqUpstream(cfg, vpn, tunIface)
 	dhcpDNS := renderDnsmasqDHCPOptions(vpn)
+	extraListen := tailscaleListenAddresses(cfg)
+	extraIfaces := tailscaleDnsmasqInterfaces(cfg)
+
+	listenAddrs := []string{cfg.LANAddress}
+	listenAddrs = append(listenAddrs, extraListen...)
+	interfaceLines := fmt.Sprintf("interface=%s\n", cfg.LANInterface)
+	for _, iface := range extraIfaces {
+		interfaceLines += fmt.Sprintf("interface=%s\n", iface)
+	}
+	listenLines := ""
+	for _, addr := range listenAddrs {
+		if addr != "" {
+			listenLines += fmt.Sprintf("listen-address=%s\n", addr)
+		}
+	}
 
 	conf := fmt.Sprintf(`# Managed by vpn-connector
-interface=%s
-bind-interfaces
-listen-address=%s
+%s%sbind-interfaces
 except-interface=%s
 dhcp-range=%s,%s,%s,%dh
 dhcp-option=option:router,%s
 dhcp-option=option:dns-server,%s
 %sno-resolv
 %s
-`, cfg.LANInterface, cfg.LANAddress, cfg.WANInterface,
+`, interfaceLines, listenLines, cfg.WANInterface,
 		cfg.DHCPRangeStart, cfg.DHCPRangeEnd, netmask, cfg.DHCPLeaseHours,
 		cfg.LANAddress, cfg.LANAddress, dhcpDNS, upstream)
 

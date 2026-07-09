@@ -56,6 +56,7 @@ func main() {
 	http.HandleFunc("/api/vpn/input", handlers.RequireAuth(handlers.VPNInputHandler))
 	http.HandleFunc("/api/vpn/disconnect", handlers.RequireAuth(handlers.VPNDisconnectHandler))
 	http.HandleFunc("/api/vpn/reconnect", handlers.RequireAuth(handlers.VPNReconnectHandler))
+	http.HandleFunc("/api/tailscale/exit-node", handlers.RequireAuth(handlers.TailscaleExitNodeHandler))
 
 	go func() {
 		log.Println("Starting server on :5000")

@@ -326,7 +326,7 @@ func MaintainManagementAccess(cfg RouterConfig, serverURL string) {
 		removeVPNRoutesOverlappingLocal(cfg, st.TunIface)
 		EnsureVPNDNSIfNeeded()
 	}
-	loosenReversePathFiltering(cfg.WANInterface, cfg.LANInterface)
+	loosenReversePathFiltering(cfg.WANInterface, cfg.LANInterface, tailscaleInterface)
 }
 
 func StartManagementWatchdog(serverURL string) {
@@ -377,7 +377,7 @@ func ApplyVPNPolicyRouting(cfg RouterConfig, tunIface string, serverURL string) 
 	flushVPNPolicyRouting(cfg)
 	MaintainManagementAccess(cfg, serverURL)
 	removeVPNRoutesOverlappingLocal(cfg, tunIface)
-	loosenReversePathFiltering(cfg.WANInterface, cfg.LANInterface, tunIface)
+	loosenReversePathFiltering(cfg.WANInterface, cfg.LANInterface, tunIface, tailscaleInterface)
 	logTunnelRoutes(tunIface)
 	log.Printf("VPN routing: Fortinet split routes on main (vpnc-script); forward LAN -> %s", tunIface)
 	return nil
