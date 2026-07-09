@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VPN Connector</title>
-    <link rel="stylesheet" href="styles.css?v=3">
+    <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
     <div id="infoBox" class="info-box"></div>
@@ -16,10 +16,23 @@
             <label>Password
                 <input type="password" id="connectPassword" autocomplete="current-password">
             </label>
-            <p class="muted small">A FortiToken code will be requested in the connection log below.</p>
+            <p class="muted small">A FortiToken popup appears when the VPN server asks for it.</p>
             <div class="button-row">
                 <button id="connectConfirmBtn" class="primary">Connect</button>
                 <button id="connectCancelBtn" class="secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="tokenModal" class="modal modal-front hidden">
+        <div class="modal-content">
+            <h3>FortiToken required</h3>
+            <p id="tokenModalPrompt" class="muted">Enter token code or leave empty to send a push notification to your FortiToken Mobile.</p>
+            <label>Token / OTP
+                <input type="text" id="vpnToken" inputmode="numeric" autocomplete="one-time-code" placeholder="123456">
+            </label>
+            <div class="button-row">
+                <button id="submitTokenBtn" class="primary">Submit token</button>
             </div>
         </div>
     </div>
@@ -94,16 +107,9 @@
             </form>
         </div>
 
-        <div id="logTerminal" class="log-terminal" tabindex="0">
-            <pre id="logOutput" class="log-output"></pre>
-            <div id="logInputRow" class="log-input-row">
-                <span class="log-prompt">Code:</span>
-                <input type="text" id="logTerminalInput" inputmode="numeric" autocomplete="one-time-code" spellcheck="false" aria-label="FortiToken code" disabled placeholder="Connect VPN — type here when Code: is prompted">
-                <button type="button" id="logSubmitBtn" class="log-submit" disabled title="Submit token">↵</button>
-            </div>
-        </div>
+        <pre id="logTail" class="log-tail"></pre>
     </div>
 
-    <script src="app.js?v=3"></script>
+    <script src="app.js?v=4"></script>
 </body>
 </html>
