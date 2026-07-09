@@ -3,8 +3,11 @@
 # Installs git, runtime packages, clones the repo, installs Go, compiles, then runs install.sh.
 #
 # Usage (on the device, as root):
-#   curl -fsSL https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/master/scripts/bootstrap-device.sh | sh
-#   wget -qO- https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/master/scripts/bootstrap-device.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/tailscaled/scripts/bootstrap-device.sh | sh
+#   wget -qO- https://raw.githubusercontent.com/pmozdzynski/raspberry-vpn-connector/tailscaled/scripts/bootstrap-device.sh | sh
+#
+# Override branch explicitly (note: env var applies to sh, not curl):
+#   curl -fsSL https://raw.githubusercontent.com/.../bootstrap-device.sh | BRANCH=tailscaled sh
 #
 # Or after cloning:
 #   sudo ./scripts/bootstrap-device.sh
@@ -12,7 +15,28 @@ set -eu
 
 REPO_URL="${REPO_URL:-https://github.com/pmozdzynski/raspberry-vpn-connector.git}"
 REPO_DIR="${REPO_DIR:-/opt/vpn-connector-src}"
-BRANCH="${BRANCH:-master}"
+
+resolve_branch() {
+	if [ -n "${BRANCH:-}" ]; then
+		echo "$BRANCH"
+		return
+	fi
+	# When run from a local checkout (not piped via curl), use that branch.
+	case "$0" in
+		sh|dash|bash|/bin/sh|/bin/dash|/bin/bash) ;;
+		*)
+			script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+			repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+			if [ -d "$repo_root/.git" ]; then
+				git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null && return
+			fi
+			;;
+	esac
+	# Default for this branch line (tailscaled feature branch).
+	echo "tailscaled"
+}
+
+BRANCH="$(resolve_branch)"
 
 if [ "$(id -u)" -ne 0 ]; then
 	if command -v sudo >/dev/null 2>&1; then
