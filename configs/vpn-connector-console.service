@@ -1,0 +1,19 @@
+[Unit]
+Description=VPN Connector console menu (HDMI / tty1)
+After=network-online.target vpn-connector.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vpn-connector
+ExecStart=/opt/vpn-connector/vpn-connector console
+Restart=always
+RestartSec=3
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target

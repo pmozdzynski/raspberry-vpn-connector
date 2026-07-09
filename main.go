@@ -17,6 +17,17 @@ func checkRootPrivileges() {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "token-prompt":
+			checkRootPrivileges()
+			os.Exit(handlers.RunTokenPromptPopup())
+		case "console":
+			checkRootPrivileges()
+			os.Exit(handlers.RunConsoleMenu())
+		}
+	}
+
 	checkRootPrivileges()
 
 	http.HandleFunc("/setup", handlers.SetupPageHandler)

@@ -224,30 +224,27 @@ button:disabled {
 
 .error-text { color: #c62828; font-weight: bold; }
 
-.token-panel {
-  margin: 12px 0;
-  padding: 12px;
-  border: 2px solid #2e7d32;
-  border-radius: 8px;
-  text-align: left;
-  background: #f1f8e9;
-}
-
 .modal {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  padding: 16px;
+}
+
+.modal-front {
+  z-index: 1100;
 }
 
 .modal-content {
   background: #fff;
   padding: 20px;
   border-radius: 10px;
-  width: 90%;
+  width: 100%;
   max-width: 420px;
   text-align: left;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
 }

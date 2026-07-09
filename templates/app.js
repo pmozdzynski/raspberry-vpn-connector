@@ -38,17 +38,22 @@ function logNeedsToken(logTail) {
         || /(^|\n)\s*code:\s*$/im.test(text);
 }
 
-function showTokenPanel(prompt) {
+let tokenModalOpen = false;
+
+function openTokenModal(prompt) {
     closeConnectModal();
-    const panel = document.getElementById("tokenPanel");
-    document.getElementById("tokenPrompt").textContent =
+    document.getElementById("tokenModalPrompt").textContent =
         prompt || "VPN server is waiting for a one-time token.";
-    panel.classList.remove("hidden");
-    document.getElementById("vpnToken").focus();
+    document.getElementById("tokenModal").classList.remove("hidden");
+    if (!tokenModalOpen) {
+        tokenModalOpen = true;
+        document.getElementById("vpnToken").focus();
+    }
 }
 
-function hideTokenPanel() {
-    document.getElementById("tokenPanel").classList.add("hidden");
+function closeTokenModal() {
+    document.getElementById("tokenModal").classList.add("hidden");
+    tokenModalOpen = false;
 }
 
 function vpnWaitingForToken(vpn, logTail, waitingFlag) {
@@ -75,23 +80,23 @@ function renderVPN(vpn, logTail, waitingFlag) {
     if (vpn.phase === "connected") {
         details.textContent = `${vpn.profile_name || vpn.profile_id} via ${vpn.tun_iface || "tun"} since ${vpn.since || "?"}`;
         disconnectBtn.disabled = false;
-        hideTokenPanel();
+        closeTokenModal();
     } else if (waitingForToken) {
-        details.textContent = "Enter your one-time token or OTP code below.";
+        details.textContent = "Enter your one-time token in the popup.";
         disconnectBtn.disabled = false;
-        showTokenPanel(vpn.input_prompt);
+        openTokenModal(vpn.input_prompt);
     } else if (vpn.phase === "connecting") {
         details.textContent = `Connecting to ${vpn.profile_name || vpn.profile_id || "VPN"}...`;
         disconnectBtn.disabled = false;
-        hideTokenPanel();
+        closeTokenModal();
     } else if (vpn.phase === "error") {
         details.textContent = vpn.last_error || "Connection failed";
         disconnectBtn.disabled = true;
-        hideTokenPanel();
+        closeTokenModal();
     } else {
         details.textContent = vpn.last_error || "LAN uses direct WAN NAT";
         disconnectBtn.disabled = true;
-        hideTokenPanel();
+        closeTokenModal();
     }
 
     reconnectBtn.disabled = vpn.phase === "connecting" || waitingForToken;
@@ -276,7 +281,7 @@ async function startConnect(profileId, password) {
         return;
     }
     closeConnectModal();
-    showInfo("Connecting... enter FortiToken when the field appears", "info");
+    showInfo("Connecting... FortiToken popup will appear when required", "info");
     refresh();
 }
 
@@ -292,7 +297,7 @@ async function submitToken() {
         return;
     }
     document.getElementById("vpnToken").value = "";
-    hideTokenPanel();
+    closeTokenModal();
     showInfo("Token sent", "ok");
     refresh();
 }
@@ -386,7 +391,7 @@ document.getElementById("reconnectBtn").addEventListener("click", async () => {
         showInfo(await res.text(), "error");
         return;
     }
-    showInfo("Reconnecting... enter FortiToken when the field appears", "info");
+    showInfo("Reconnecting... FortiToken popup will appear when required", "info");
     refresh();
 });
 

@@ -44,6 +44,9 @@ install_app_files() {
 install_systemd() {
 	log "Installing systemd service"
 	cp "$REPO_DIR/configs/vpn-connector.service" /etc/systemd/system/vpn-connector.service
+	if [ -f "$REPO_DIR/configs/vpn-connector-console.service" ]; then
+		cp "$REPO_DIR/configs/vpn-connector-console.service" /etc/systemd/system/vpn-connector-console.service
+	fi
 	systemctl daemon-reload
 	systemctl enable vpn-connector.service
 	systemctl restart vpn-connector.service
