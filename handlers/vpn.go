@@ -90,6 +90,13 @@ func GetVPNState() VPNState {
 			maybePromoteTokenPrompt(&st)
 			return st
 		}
+		if prompt, ok := detectTokenPrompt(readLogTail(120)); ok {
+			st.Phase = VPNPhaseNeedInput
+			st.InputPrompt = prompt
+			st.InputKind = "token"
+			saveVPNState(st)
+			return st
+		}
 		if st.Phase != VPNPhaseConnected {
 			st.Phase = VPNPhaseDisconnected
 			st.Connected = false
@@ -139,7 +146,16 @@ func saveVPNState(st VPNState) {
 	_ = os.WriteFile(stateFile, data, 0644)
 }
 
+func hasActiveVPNSession() bool {
+	vpnMu.Lock()
+	defer vpnMu.Unlock()
+	return activeVPNSession != nil
+}
+
 func isOpenConnectRunning() bool {
+	if hasActiveVPNSession() {
+		return true
+	}
 	if pid := readTrackedOpenConnectPID(); pid > 0 && processRunning(pid) {
 		return true
 	}
@@ -178,15 +194,21 @@ func isProcessZombie(pid int) bool {
 }
 
 func findOpenConnectPID() int {
-	out, err := exec.Command("pgrep", "-n", "-x", "openconnect").Output()
-	if err != nil {
-		return 0
+	for _, args := range [][]string{
+		{"pgrep", "-n", "-x", "openconnect"},
+		{"pgrep", "-n", "-f", "openconnect"},
+	} {
+		out, err := exec.Command(args[0], args[1:]...).Output()
+		if err != nil {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+		if err != nil || pid <= 0 || isProcessZombie(pid) {
+			continue
+		}
+		return pid
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil || pid <= 0 || isProcessZombie(pid) {
-		return 0
-	}
-	return pid
+	return 0
 }
 
 func writeOpenConnectPID(pid int) {
@@ -448,18 +470,36 @@ func watchOpenConnectProcess(sess *vpnConn) {
 		return
 	}
 	tun := detectTunInterface()
-	childPID := 0
-	if tunnelReady(tun) {
-		childPID = findOpenConnectPID()
-	}
+	childPID := findOpenConnectPID()
 	vpnMu.Unlock()
 
 	if childPID > 0 {
 		writeOpenConnectPID(childPID)
-		ignoreTunInNetworkManager(tun)
-		finishConnected(sess, tun)
+		if tunnelReady(tun) {
+			ignoreTunInNetworkManager(tun)
+			finishConnected(sess, tun)
+		} else {
+			syncTokenPromptState(sess)
+		}
 		log.Printf("openconnect parent exited (%v); tracking pid %d", waitErr, childPID)
 		go watchOpenConnectPID(sess, childPID)
+		return
+	}
+
+	if prompt, ok := detectTokenPrompt(readLogTail(120)); ok {
+		vpnMu.Lock()
+		if activeVPNSession == sess {
+			saveVPNState(VPNState{
+				Phase:       VPNPhaseNeedInput,
+				ProfileID:   sess.profile.ID,
+				ProfileName: sess.profile.Name,
+				ServerURL:   sess.profile.ServerURL,
+				InputPrompt: prompt,
+				InputKind:   "token",
+			})
+		}
+		vpnMu.Unlock()
+		log.Printf("openconnect waiting for token after parent exit")
 		return
 	}
 
@@ -903,5 +943,5 @@ func EnsureOpenConnectInstalled() error {
 }
 
 func OpenConnectLogTail() string {
-	return readLogTail(40)
+	return readLogTail(120)
 }

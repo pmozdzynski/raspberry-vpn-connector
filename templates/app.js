@@ -44,7 +44,8 @@ function renderVPN(vpn, logTail) {
     const tokenPanel = document.getElementById("tokenPanel");
     const tokenPrompt = document.getElementById("tokenPrompt");
 
-    const waitingForToken = vpn.phase === "need_input" || (vpn.phase === "connecting" && logNeedsToken(logTail));
+    const waitingForToken = vpn.phase === "need_input"
+        || (logNeedsToken(logTail) && vpn.phase !== "connected");
 
     state.textContent = waitingForToken ? "Token required" : phaseLabel(vpn.phase);
     state.className = vpn.phase === "connected" ? "ok" : (vpn.phase === "error" ? "error-text" : "muted");
@@ -215,7 +216,7 @@ async function refresh() {
         renderProfiles(data.profiles || [], data.vpn);
         document.getElementById("logTail").textContent = data.log_tail || "";
 
-        const active = data.vpn.phase === "connecting" || data.vpn.phase === "need_input";
+        const active = data.vpn.phase === "connecting" || data.vpn.phase === "need_input" || logNeedsToken(data.log_tail);
         schedulePoll(active);
 
         if (data.vpn.phase === "connected" && prevPhase !== "connected") {
