@@ -86,21 +86,19 @@ func GetVPNState() VPNState {
 				return st
 			}
 		}
-		if running {
+		if running || hasActiveVPNSession() {
 			maybePromoteTokenPrompt(&st)
 			return st
 		}
-		if prompt, ok := detectTokenPrompt(readLogTail(120)); ok {
-			st.Phase = VPNPhaseNeedInput
-			st.InputPrompt = prompt
-			st.InputKind = "token"
-			saveVPNState(st)
-			return st
+		if st.Phase == VPNPhaseNeedInput {
+			st.InputPrompt = ""
+			st.InputKind = ""
 		}
 		if st.Phase != VPNPhaseConnected {
 			st.Phase = VPNPhaseDisconnected
 			st.Connected = false
 		}
+		saveVPNState(st)
 		return st
 	}
 
@@ -834,7 +832,7 @@ func interfaceHasIPv4(iface string) bool {
 }
 
 func syncTokenPromptState(sess *vpnConn) {
-	if sess == nil || sess.inputSent {
+	if sess == nil || sess.inputSent || !sess.passwordSent {
 		return
 	}
 	prompt, ok := detectTokenPrompt(readLogTail(120))
