@@ -29,7 +29,17 @@ function phaseLabel(phase) {
     }
 }
 
-/** Matches FortiGate log ending with the token prompt + "Code:" line. */
+/** Loose check — log looks like it is waiting for a FortiToken code. */
+function logHintsFortiToken(logTail) {
+    const text = logTail || "";
+    const lower = text.toLowerCase();
+    return lower.includes("fortitoken")
+        || lower.includes("enter token code")
+        || lower.includes("token code")
+        || /(^|\n)\s*code:\s*$/im.test(text);
+}
+
+/** Strict check for optional auto-popup. */
 function logShowsFortiTokenPrompt(logTail) {
     const text = logTail || "";
     const lower = text.toLowerCase();
@@ -40,23 +50,8 @@ function logShowsFortiTokenPrompt(logTail) {
     return hasFortiPrompt && hasCodeLine;
 }
 
-function sessionActive(vpn, status) {
-    return connectAttemptActive
-        || status.openconnect_running
-        || vpn.phase === "connecting"
-        || vpn.phase === "need_input";
-}
-
-function shouldOpenTokenModal(vpn, logTail, status) {
-    if (vpn.phase === "connected") {
-        return false;
-    }
-    if (!sessionActive(vpn, status)) {
-        return false;
-    }
-    return logShowsFortiTokenPrompt(logTail)
-        || status.awaiting_token
-        || vpn.phase === "need_input";
+function canEnterToken(vpn) {
+    return vpn.phase !== "connected";
 }
 
 function openTokenModal() {
@@ -67,10 +62,8 @@ function openTokenModal() {
         return;
     }
     modal.classList.remove("hidden");
-    if (!tokenModalOpen) {
-        tokenModalOpen = true;
-        input.focus();
-    }
+    tokenModalOpen = true;
+    input.focus();
 }
 
 function closeTokenModal() {
@@ -82,12 +75,45 @@ function closeTokenModal() {
     tokenModalOpen = false;
 }
 
-function syncTokenModal(vpn, logTail, status) {
-    if (shouldOpenTokenModal(vpn, logTail, status)) {
-        openTokenModal();
-    } else {
-        closeTokenModal();
+function renderEnterTokenUI(vpn, logTail) {
+    const btn = document.getElementById("enterTokenBtn");
+    const hint = document.getElementById("tokenHint");
+    const link = document.getElementById("enterTokenLink");
+    if (!btn) {
+        return;
     }
+
+    const allowed = canEnterToken(vpn);
+    const highlighted = allowed && logHintsFortiToken(logTail);
+
+    btn.disabled = !allowed;
+    btn.classList.toggle("token-btn-highlight", highlighted);
+
+    if (hint) {
+        hint.classList.toggle("hidden", !highlighted);
+    }
+    if (link) {
+        link.disabled = !allowed;
+    }
+}
+
+function maybeAutoOpenTokenModal(vpn, logTail, status) {
+    if (vpn.phase === "connected" || tokenModalOpen) {
+        return;
+    }
+    if (!sessionActive(vpn, status)) {
+        return;
+    }
+    if (logShowsFortiTokenPrompt(logTail) || status.awaiting_token || vpn.phase === "need_input") {
+        openTokenModal();
+    }
+}
+
+function sessionActive(vpn, status) {
+    return connectAttemptActive
+        || status.openconnect_running
+        || vpn.phase === "connecting"
+        || vpn.phase === "need_input";
 }
 
 function renderVPN(vpn, logTail, status) {
@@ -96,19 +122,22 @@ function renderVPN(vpn, logTail, status) {
     const disconnectBtn = document.getElementById("disconnectBtn");
     const reconnectBtn = document.getElementById("reconnectBtn");
 
-    const waitingForToken = shouldOpenTokenModal(vpn, logTail, status);
+    const tokenLikely = logHintsFortiToken(logTail) && canEnterToken(vpn);
 
-    state.textContent = waitingForToken ? "Token required" : phaseLabel(vpn.phase);
-    state.className = vpn.phase === "connected" ? "ok" : (vpn.phase === "error" && !waitingForToken ? "error-text" : "muted");
+    state.textContent = tokenLikely ? "Token required" : phaseLabel(vpn.phase);
+    state.className = vpn.phase === "connected" ? "ok" : (vpn.phase === "error" && !tokenLikely ? "error-text" : "muted");
+
+    renderEnterTokenUI(vpn, logTail);
+    maybeAutoOpenTokenModal(vpn, logTail, status);
 
     if (vpn.phase === "connected") {
         details.textContent = `${vpn.profile_name || vpn.profile_id} via ${vpn.tun_iface || "tun"} since ${vpn.since || "?"}`;
         disconnectBtn.disabled = false;
-    } else if (waitingForToken) {
-        details.textContent = "FortiToken popup is open — enter your code and submit.";
+    } else if (tokenLikely) {
+        details.textContent = "Click Enter FortiToken (or the link above the log) to type your code.";
         disconnectBtn.disabled = false;
     } else if (vpn.phase === "connecting") {
-        details.textContent = `Connecting to ${vpn.profile_name || vpn.profile_id || "VPN"}...`;
+        details.textContent = `Connecting to ${vpn.profile_name || vpn.profile_id || "VPN"}... Click Enter FortiToken if Code: appears in the log.`;
         disconnectBtn.disabled = false;
     } else if (vpn.phase === "error") {
         details.textContent = vpn.last_error || "Connection failed";
@@ -118,8 +147,7 @@ function renderVPN(vpn, logTail, status) {
         disconnectBtn.disabled = true;
     }
 
-    reconnectBtn.disabled = vpn.phase === "connecting" || waitingForToken;
-    syncTokenModal(vpn, logTail, status);
+    reconnectBtn.disabled = vpn.phase === "connecting" || tokenLikely;
 }
 
 function renderProfiles(profiles, vpn, logTail, status) {
@@ -129,7 +157,7 @@ function renderProfiles(profiles, vpn, logTail, status) {
         return;
     }
 
-    const busy = vpn.phase === "connecting" || shouldOpenTokenModal(vpn, logTail, status);
+    const busy = vpn.phase === "connecting" || (logHintsFortiToken(logTail) && canEnterToken(vpn));
 
     list.innerHTML = profiles.map(p => {
         const active = vpn.connected && vpn.profile_id === p.id;
@@ -286,11 +314,12 @@ async function refresh() {
             logEl.textContent = logTail;
         }
 
-        const waitingForToken = shouldOpenTokenModal(data.vpn, logTail, status);
+        const waitingForToken = logHintsFortiToken(logTail) && canEnterToken(data.vpn);
         const active = connectAttemptActive
             || data.vpn.phase === "connecting"
             || data.vpn.phase === "need_input"
-            || waitingForToken;
+            || waitingForToken
+            || tokenModalOpen;
         schedulePoll(active);
 
         if (data.vpn.phase === "connected" && prevPhase !== "connected") {
@@ -424,6 +453,15 @@ document.getElementById("connectConfirmBtn").addEventListener("click", () => {
     startConnect(connectProfileId, document.getElementById("connectPassword").value);
 });
 document.getElementById("connectCancelBtn").addEventListener("click", closeConnectModal);
+
+document.getElementById("enterTokenBtn").addEventListener("click", () => {
+    openTokenModal();
+});
+
+document.getElementById("enterTokenLink").addEventListener("click", () => {
+    openTokenModal();
+});
+
 document.getElementById("submitTokenBtn").addEventListener("click", submitToken);
 document.getElementById("vpnToken").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {

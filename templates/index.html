@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VPN Connector</title>
-    <link rel="stylesheet" href="styles.css?v=4">
+    <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
     <div id="infoBox" class="info-box"></div>
@@ -47,9 +47,11 @@
             <h3>VPN Status</h3>
             <p><strong>State:</strong> <span id="vpnState">Loading...</span></p>
             <p id="vpnDetails" class="muted"></p>
+            <p id="tokenHint" class="token-hint hidden">See <strong>Code:</strong> in the log below? Click <button type="button" id="enterTokenLink" class="link-btn">Enter FortiToken</button> to type your code.</p>
             <p id="wifiApStatus" class="muted small"></p>
             <p id="mgmtHint" class="muted small"></p>
             <div class="button-row">
+                <button id="enterTokenBtn" class="primary" disabled>Enter FortiToken</button>
                 <button id="disconnectBtn" class="danger" disabled>Disconnect</button>
                 <button id="reconnectBtn" class="secondary" disabled>Reconnect last</button>
             </div>
@@ -110,6 +112,6 @@
         <pre id="logTail" class="log-tail"></pre>
     </div>
 
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=5"></script>
 </body>
 </html>

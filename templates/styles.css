@@ -227,6 +227,38 @@ button:disabled {
 
 .error-text { color: #c62828; font-weight: bold; }
 
+.token-hint {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: #fff8e1;
+  border: 1px solid #f9a825;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: #1565c0;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
+.link-btn:hover {
+  color: #0d47a1;
+}
+
+#enterTokenBtn.token-btn-highlight {
+  animation: token-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes token-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(46, 125, 50, 0.5); }
+  50% { box-shadow: 0 0 0 8px rgba(46, 125, 50, 0); }
+}
+
 .modal {
   position: fixed;
   inset: 0;
